@@ -1,0 +1,10 @@
+name = "Socp"
+uuid = "75b53bb0-8fcd-11e9-12a5-873b84a89dd1"
+authors = ["Benjamin Chung <ckfinite@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+TensorFlow = "1d978283-2c37-5f34-9a8e-e9c0ece82495"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
