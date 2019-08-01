@@ -65,7 +65,7 @@ function solve_socp(prob::Problem)
 		step = compute_step(cones, l, W*rz, iW'*rs) 
 		step *= 0.99
 		sup = line_search_scaled(cones, scaling, rz, rs)
-		println("$t, $step")
+		println("$(state.x)")
 		state.x .+= rx .* step
 		state.y .+= ry .* step
 		state.z .+= rz .* step
