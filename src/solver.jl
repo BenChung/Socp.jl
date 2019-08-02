@@ -49,7 +49,7 @@ function solve_socp(prob::Problem)
 			break
 		end
 		rmul!(dx, -1.0); rmul!(dy, -1.0); rmul!(dz, -1.0)
-		solve_kkt(prob, state, scaling, dx, dy, dz, -ds, rx,ry,rz,rs, ss=ss)
+		solve_kkt(prob, state, scaling, dx, dy, dz, -ds, rx,ry,rz,rs, true, ss=ss)
 		t = compute_step(cones,l,W*rz, iW'*rs)
 
 		rho = 1-t-t^2 * dot(iW'*rs, W*rz)/dot(l,l)
@@ -60,12 +60,11 @@ function solve_socp(prob::Problem)
 		vprod!(cones, ic1, iW'*rs, W*rz)
 		comb_s = -ds .+ sig*mu*idel .- ic1
 		rmul!(dx, scfact); rmul!(dy, scfact); rmul!(dz, scfact)
-		solve_kkt(prob, state, scaling, dx, dy, dz, comb_s, rx,ry,rz,rs, ss=ss)
+		solve_kkt(prob, state, scaling, dx, dy, dz, comb_s, rx,ry,rz,rs, false, ss=ss)
 
 		step = compute_step(cones, l, W*rz, iW'*rs) 
 		step *= 0.99
 		sup = line_search_scaled(cones, scaling, rz, rs)
-		println("$(state.x)")
 		state.x .+= rx .* step
 		state.y .+= ry .* step
 		state.z .+= rz .* step

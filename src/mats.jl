@@ -127,14 +127,16 @@ struct SolveState
 	prf2::Vector{Float64}
 	prf3::Matrix{Float64}
 	prf4::Vector{Float64}
+	prf5::Matrix{Float64}
 	iR::Matrix{Float64}
 	siR::Matrix{Float64}
+	herm::Matrix{Float64}
 	SolveState(pr::Problem) = 
 		new(zeros(pr.k), zeros(pr.k), zeros(pr.k), zeros(pr.n, pr.k), zeros(pr.n), 
-			zeros(pr.n, pr.n), zeros(pr.n), zeros(pr.n, pr.n), zeros(pr.m, pr.n))
+			zeros(pr.n, pr.n), zeros(pr.n), zeros(pr.n, pr.n), zeros(pr.n, pr.n), zeros(pr.m, pr.n), Hermitian(zeros(pr.n, pr.n)))
 end
 
-function solve_kkt(pr::Problem, s::State, scaling, dx, dy, dz, ds, cx, cy, cz, cs;
+function solve_kkt(pr::Problem, s::State, scaling, dx, dy, dz, ds, cx, cy, cz, cs, mehrotra;
 		ss::SolveState = SolveState(pr))
 	n,m,k = pr.n,pr.m,pr.k
 	W,iW,l = scaling.W,scaling.iW,scaling.l
@@ -147,22 +149,26 @@ function solve_kkt(pr::Problem, s::State, scaling, dx, dy, dz, ds, cx, cy, cz, c
 	prf2 = ss.prf2
 	prf3 = ss.prf3
 	prf4 = ss.prf4
+	prf5 = ss.prf5
 	iR = ss.iR
 	siR = ss.siR
+	prf0 = scaling.iWiW
+
+	if mehrotra 
+		mul!(prf1, pr.G', prf0)
+		mul!(prf3, prf1, pr.G)
+		prfi3 = Hermitian(prf3)
+		L = cholesky!(prfi3)
+		iL = inv(L.L)
+		mul!(iR, iL', iL)
+		mul!(siR, pr.A, iR)
+	end
 
 	iprod!(pr.cones, ipr, l, ds)
 	mul!(temp1, W', ipr)
 	bx = dx
 	by = dy
 	temp2 .= dz .- temp1
-
-	prf0 = scaling.iWiW
-	mul!(prf1, pr.G', prf0)
-	mul!(prf3, prf1, pr.G)
-	L = cholesky(Hermitian(prf3)).L
-	iL = inv(L)
-	mul!(iR, iL', iL)
-	mul!(siR, pr.A, iR)
 	mul!(prf2, prf1, temp2)
 	prf2 .+= bx
 
