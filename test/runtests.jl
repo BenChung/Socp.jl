@@ -4,6 +4,7 @@ using Socp: deg, max_step, solve_socp, Scaling
 using Test
 using LinearAlgebra
 
+#=
 @testset "Vector operations" begin
     tv1 = Float64[1,1,1,1,2,3]
     tv2 = Float64[1,1,1,1,5,6]
@@ -72,4 +73,25 @@ end
 	prob = Problem(c, A, b, G, h, cones)
 	soln = solve_socp(prob)
 	@test norm(soln.x .- [-5.01467, -5.7669, -8.52176]) < 0.001
+end
+=#
+
+@testset "SOC programming 3" begin
+	c = [-2.0, 1.0, 5.0]
+
+	A = [1.0 0.0 0.0] # Array{Float64,2}(UndefInitializer(), 0, 3)
+	b = [-3.0] # Array{Float64,1}(UndefInitializer(), 0)
+
+	G = [12.0 6.0 -5.0;
+		 13.0 -3.0 -5.0;
+		 12.0 -12.0 6.0;
+		 3.0 -6.0 10.0;
+		 3.0 -6.0 -2.0;
+		 -1.0 -9.0 -2.0;
+		 1.0 19.0 -3.0]
+	h = [-12.0, -3.0, -2.0, 27.0, 0.0, 3.0, -42.0]
+	cones = Cone[SOC(0,3), SOC(3,4)]
+	prob = Problem(c, A, b, G, h, cones)
+	soln = solve_socp(prob)
+	@test norm(soln.x .- [-3.0, -4.82569, -6.64011]) < 0.001
 end
