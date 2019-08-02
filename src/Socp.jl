@@ -63,5 +63,6 @@ include("scalings.jl")
 include("vectors.jl")
 include("mats.jl")
 include("solver.jl")
+include("moi.jl")
 
 end # module
