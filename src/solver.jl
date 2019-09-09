@@ -1,12 +1,97 @@
-function solve_socp(prob::Problem)
+struct SolverState
+	scaling::Scaling
+	kktstate::KKTState
+	initm::Matrix{Float64}
+	initv::Vector{Float64}
+	idel::Vector{Float64}
+	dx::Vector{Float64}
+	dy::Vector{Float64}
+	dz::Vector{Float64}
+	ds::Vector{Float64}
+	nt1::Vector{Float64}
+	nt2::Vector{Float64}
+	mt1::Vector{Float64}
+	kt1::Vector{Float64}
+	kt2::Vector{Float64}
+	kt3::Vector{Float64}
+	rx::Vector{Float64}
+	ry::Vector{Float64}
+	rz::Vector{Float64}
+	rs::Vector{Float64}
+
+	function SolverState(pr::Problem)
+		scaling = Scaling(pr)
+		ss = KKTState(pr)
+		n = pr.n
+		m = pr.m
+		k = pr.k
+		
+	    initm = zeros(n+m+k, n+m+k)
+	    initv = zeros(n+m+k)
+		idel = zeros(k)
+		dx,dy,dz,ds = zeros(n),zeros(m),zeros(k),zeros(k)
+		nt1,nt2 = zeros(n),zeros(n)
+		mt1 = zeros(m)
+		kt1,kt2,kt3 = zeros(k),zeros(k),zeros(k)
+		rx,ry,rz,rs = zeros(n), zeros(m), zeros(k), zeros(k)
+		return new(scaling, ss, initm, initv, idel, dx, dy, dz, ds, nt1, nt2, mt1, kt1, kt2, kt3, rx, ry, rz, rs)
+	end
+end
+
+function solve_socp(prob::Problem, ss::SolverState)
 	n = prob.n
 	m = prob.m
 	k = prob.k
 	cones = prob.cones
-	initials::Vector{Float64} = [zeros(n, n) prob.A' prob.G'; 
-	             prob.A zeros(m, m) zeros(m, k); 
-	             prob.G zeros(k, m) -Matrix{Float64}(I, k, k)]\[-prob.c;prob.b;prob.h]
-	idel = make_e(cones)
+
+	scaling, ks = ss.scaling, ss.kktstate
+	initm, initv, idel = ss.initm, ss.initv, ss.idel
+	dx,dy,dz,ds = ss.dx,ss.dy,ss.dz,ss.ds
+	nt1,nt2,mt1,kt1,kt2,kt3 = ss.nt1,ss.nt2,ss.mt1,ss.kt1,ss.kt2,ss.kt3
+	rx,ry,rz,rs = ss.rx,ss.ry,ss.rz,ss.rs
+	println("$n $m $k")
+	#=
+    open("A.txt", "w") do f
+    	println(f, prob.A)
+    end
+    open("G.txt", "w") do f
+    	println(f, prob.G)
+    end
+    open("c.txt", "w") do f
+    	println(f, prob.c)
+    end 
+    open("b.txt", "w") do f
+    	println(f, prob.b)
+    end
+    open("h.txt", "w") do f
+    	println(f, prob.h)
+    end
+    open("cones.txt", "w") do f
+    	println(f, prob.cones)
+    end
+	=#
+    initm[1:n,n+1:n+m] .= prob.A'
+    initm[1:n,n+m+1:n+m+k] .= prob.G'
+    initm[n+1:n+m,1:n] .= prob.A
+    initm[n+m+1:n+m+k,1:n] .= prob.G
+    for i=n+m+1:n+m+k 
+    	initm[i,i] = -1.0
+    end
+    initv[1:n] .= (-).(prob.c)
+    initv[n+1:n+m] .= prob.b 
+    initv[n+m+1:n+m+k] .= prob.h
+    #=
+    open("initm.txt", "w") do f
+    	println(f, initm)
+    end
+    open("initv.txt", "w") do f
+    	println(f, initv)
+    end
+    =#
+
+	initials::Vector{Float64} = initm\initv
+
+	make_e!(cones, idel)
 	iz::Vector{Float64} = initials[n+m+1:n+m+k]
 	alphp = max_step(cones, -iz)
 	alphd = max_step(cones, iz)
@@ -25,46 +110,47 @@ function solve_socp(prob::Problem)
 
 #	println("$initials $inits $initz")
 	state = State(prob, initials[1:n], initials[n+1:n+m], initz, inits)
-	scaling = Scaling(prob)
-	ss = SolveState(prob)
-
-	ds = zeros(length(initz))
-	ic1 = zeros(length(initz))
-	zdz = zeros(length(state.s))
-	rx,ry,rz,rs = zeros(n), zeros(m), zeros(k), zeros(k)
 	for i=1:40
 		scaling = compute_scaling(cones, scaling, state.s, state.z)
 		W,iW,l = scaling.W, scaling.iW, scaling.l
 		# solve affine direction
-		dx = prob.A'*state.y .+ prob.G'*state.z .+ prob.c
-		dy = prob.A*state.x .- prob.b
-		dz = prob.G*state.x .+ state.s .- prob.h
-		vprod!(cones, ds, l, l)
-		# println("s $(state.x) $(state.y) $(state.z) $(state.s)")
-		#println("d $dx $dy $dz $ds")
+		# dx = prob.A'*state.y .+ prob.G'*state.z .+ prob.c
+		mul!(nt1, prob.A', state.y)
+		mul!(nt2, prob.G', state.z)
+		dx .= nt1 .+ nt2 .+ prob.c
+		# dy = prob.A*state.x .- prob.b
+		mul!(mt1, prob.A, state.x)
+		dy .= mt1 .- prob.b
+		# dz = prob.G*state.x .+ state.s .- prob.h
+		mul!(kt1, prob.G, state.x)
+		dz .= kt1 .+ state.s .- prob.h
 
-		if (norm(dx) + norm(dy) + dot(state.z,state.s)) < 1e-5 && 
-			cgt(cones, state.s, zdz) &&
-			cgt(cones, state.z, zdz)
+		vprod!(cones, ds, l, l)
+
+		if (norm(dx) + norm(dy) + dot(state.z,state.s)) < 1e-5
 			break
 		end
-		rmul!(dx, -1.0); rmul!(dy, -1.0); rmul!(dz, -1.0)
-		solve_kkt(prob, state, scaling, dx, dy, dz, -ds, rx,ry,rz,rs, true, ss=ss)
-		t = compute_step(cones,l,W*rz, iW'*rs)
+		rmul!(dx, -1.0); rmul!(dy, -1.0); rmul!(dz, -1.0); rmul!(ds, -1.0)
+		solve_kkt(prob, state, scaling, dx, dy, dz, ds, rx,ry,rz,rs, true, ks)
+		scale!(prob.cones, scaling, rz, kt3)
+		iscale!(prob.cones, scaling, rs, kt2)
+		t = compute_step(cones, l, kt3, kt2)
 
-		rho = 1-t-t^2 * dot(iW'*rs, W*rz)/dot(l,l)
+		rho = 1-t-t^2 * dot(kt2, kt3)/dot(l,l)
 		sig = max(0, min(1, rho))^3
 		mu = dot(l,l)/deg(cones)
 
 		scfact = 1.0-sig
-		vprod!(cones, ic1, iW'*rs, W*rz)
-		comb_s = -ds .+ sig*mu*idel .- ic1
+		vprod!(cones, kt1, kt2, kt3)
+		mul!(kt2, sig*mu, idel)
+		ds .+= kt2 .- kt1
 		rmul!(dx, scfact); rmul!(dy, scfact); rmul!(dz, scfact)
-		solve_kkt(prob, state, scaling, dx, dy, dz, comb_s, rx,ry,rz,rs, false, ss=ss)
+		solve_kkt(prob, state, scaling, dx, dy, dz, ds, rx,ry,rz,rs, false, ks)
 
-		step = compute_step(cones, l, W*rz, iW'*rs) 
+		scale!(prob.cones, scaling, rz, kt3)
+		iscale!(prob.cones, scaling, rs, kt2)
+		step = compute_step(cones, l, kt3, kt2) 
 		step *= 0.99
-		sup = line_search_scaled(cones, scaling, rz, rs)
 		state.x .+= rx .* step
 		state.y .+= ry .* step
 		state.z .+= rz .* step

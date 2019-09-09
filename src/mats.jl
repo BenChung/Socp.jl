@@ -1,13 +1,30 @@
 function max_step(cones::Vector{Cone}, x)
-	return maximum(max_step(cone, x) for cone in cones)
+	maxim = typemin(Float64)
+	for cone in cones 
+		val = max_step(cone, x)
+		if val > maxim 
+			maxim = val
+		end
+	end
+	return maxim
 end
 
 function max_step(cone::POC, x)
-	return -minimum(x[cti(cone, 1):cti(cone,cone.dim)])
+	minim = typemax(Float64)
+	for i=cti(cone, 1):cti(cone,cone.dim)
+		if x[i] < minim 
+			minim = x[i]
+		end
+	end
+	return -minim
 end
 
 function max_step(cone::SOC, x)
-	return norm(x[cti(cone, 2):cti(cone,cone.dim)]) - x[cti(cone, 1)]
+	sqnrm = 0.0
+	for i=cti(cone, 2):cti(cone,cone.dim)
+		sqnrm += x[i]^2
+	end
+	return sqrt(sqnrm) - x[cti(cone, 1)]
 end
 
 function compute_step(cones, l, ds, dz)
@@ -119,10 +136,11 @@ function line_search_scaled(cones, scaling, dz, ds)
 	return h
 end
 
-struct SolveState
+mutable struct KKTState
 	ipr::Vector{Float64}
 	temp1::Vector{Float64}
 	temp2::Vector{Float64}
+	temp3::Vector{Float64}
 	prf1::Matrix{Float64}
 	prf2::Vector{Float64}
 	prf3::Matrix{Float64}
@@ -130,14 +148,27 @@ struct SolveState
 	prf5::Matrix{Float64}
 	iR::Matrix{Float64}
 	siR::Matrix{Float64}
-	herm::Matrix{Float64}
-	SolveState(pr::Problem) = 
-		new(zeros(pr.k), zeros(pr.k), zeros(pr.k), zeros(pr.n, pr.k), zeros(pr.n), 
-			zeros(pr.n, pr.n), zeros(pr.n), zeros(pr.n, pr.n), zeros(pr.n, pr.n), zeros(pr.m, pr.n), Hermitian(zeros(pr.n, pr.n)))
+	hp3::Hermitian
+	hp5::Hermitian
+	eyetgt::Matrix{Float64}
+	iL::Matrix{Float64}
+	issng::Bool
+	AA::Matrix{Float64}
+	function KKTState(pr::Problem)
+		temp3 = zeros(pr.m)
+		prf3 = zeros(pr.n, pr.n)
+		prf5 = zeros(pr.m, pr.m)
+		AA = zeros(pr.n, pr.n)
+		return new(zeros(pr.k), zeros(pr.k), zeros(pr.k), temp3, zeros(pr.n, pr.k), zeros(pr.n), 
+			prf3, zeros(pr.n), prf5, zeros(pr.n, pr.n), zeros(pr.m, pr.n), Hermitian(prf3), Hermitian(prf5), 
+			Matrix{Float64}(I,pr.n, pr.n), zeros(pr.n, pr.n), false, AA)
+	end
 end
 
-function solve_kkt(pr::Problem, s::State, scaling, dx, dy, dz, ds, cx, cy, cz, cs, mehrotra;
-		ss::SolveState = SolveState(pr))
+function solve_kkt(pr::Problem, s::State, scaling::Scaling, 
+				   dx::Vector{Float64}, dy::Vector{Float64}, dz::Vector{Float64}, ds::Vector{Float64}, 
+				   cx::Vector{Float64}, cy::Vector{Float64}, cz::Vector{Float64}, cs::Vector{Float64}, mehrotra::Bool,
+		ss::KKTState)
 	n,m,k = pr.n,pr.m,pr.k
 	W,iW,l = scaling.W,scaling.iW,scaling.l
 
@@ -145,6 +176,7 @@ function solve_kkt(pr::Problem, s::State, scaling, dx, dy, dz, ds, cx, cy, cz, c
 	ipr = ss.ipr
 	temp1 = ss.temp1
 	temp2 = ss.temp2
+	temp3 = ss.temp3
 	prf1 = ss.prf1
 	prf2 = ss.prf2
 	prf3 = ss.prf3
@@ -153,34 +185,64 @@ function solve_kkt(pr::Problem, s::State, scaling, dx, dy, dz, ds, cx, cy, cz, c
 	iR = ss.iR
 	siR = ss.siR
 	prf0 = scaling.iWiW
+	et = ss.eyetgt
+	iL = ss.iL
+	aa = ss.AA
 
 	if mehrotra 
-		mul!(prf1, pr.G', prf0)
-		mul!(prf3, prf1, pr.G)
-		prfi3 = Hermitian(prf3)
-		L = cholesky!(prfi3)
-		iL = inv(L.L)
-		mul!(iR, iL', iL)
+		mul!(prf1, pr.G', prf0) #prf1 = G'*W^-1 * W^-T 
+		mul!(prf3, prf1, pr.G) #prf3 = G'*W^-1*W^-T*G 
+		if ss.issng # prf3 will be not pos def if it wasn't before
+			prf3 .+= aa # we know that aa's been populated by now
+			L = cholesky!(ss.hp3)
+		else
+			try
+				L = cholesky!(ss.hp3)
+			catch e 
+				if isa(e, PosDefException) || isa(e, SingularException)
+					mul!(aa, pr.A', pr.A)
+					prf3 .+= aa
+					L = cholesky!(ss.hp3)
+					ss.issng = true
+				else
+					rethrow(e)
+				end
+			end
+		end
+		ldiv!(iR, L, et) #iR = L^-T L^-1
 		mul!(siR, pr.A, iR)
 	end
 
 	iprod!(pr.cones, ipr, l, ds)
-	mul!(temp1, W', ipr)
+	scale!(pr.cones, scaling, ipr, temp1)
 	bx = dx
 	by = dy
 	temp2 .= dz .- temp1
 	mul!(prf2, prf1, temp2)
 	prf2 .+= bx
-
 	At = pr.A'
-	cy .= (siR*At)\(siR*prf2 - by)
-	mul!(prf4, At, cy)
-	prf2 .-= prf4
+	if ss.issng
+		prf2 .+= At*by
+	end
+
+	mul!(prf5, siR, At)
+	yL = cholesky!(ss.hp5)
+
+	mul!(temp3, siR, prf2)
+	temp3 .-= by
+	ldiv!(cy, yL, temp3)
+	if ss.issng
+		temp3 .= by .- cy
+	else
+		temp3 .= .-cy
+	end
+	mul!(prf4, At, temp3)
+	prf2 .+= prf4
 	mul!(cx, iR, prf2)
 	mul!(temp1, pr.G, cx)
 	temp1 .-= temp2
 	mul!(cz, prf0, temp1)
-	mul!(cs, W', (ipr - W*cz))
-
-	return cx,cy,cz,cs
+	scale!(pr.cones, scaling, cz, temp1)
+	ipr .-= temp1
+	scale!(pr.cones, scaling, ipr, cs)
 end

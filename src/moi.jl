@@ -63,7 +63,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     sol::Union{Nothing, State}
     options
     function Optimizer(; kwargs...)
-        new(ConeData(), false, nothing,  kwargs)
+        new(ConeData(), false, nothing, nothing, kwargs)
     end
 end
 
@@ -258,7 +258,7 @@ function MOI.optimize!(instance::Optimizer)
     	offs += q
     end
     prob = Socp.Problem(c, A, b, G, h, cones)
-    res = solve_socp(prob)
+    res = solve_socp(prob, Socp.SolverState(prob))
     instance.sol = res
 end
 

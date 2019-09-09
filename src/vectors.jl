@@ -4,16 +4,35 @@ end
 
 #e vector generation
 
-function make_e(cone::POC)
-	return ones(cone.dim)
+function make_e!(cones::Vector{Cone}, r)
+	for c in cones 
+		make_e!(c, r)
+	end
 end
 
-function make_e(cone::SOC)
-	return [1; zeros(cone.dim-1)]
+function make_e!(cone::POC, r) 
+	for i=cti(cone, 1):cti(cone, cone.dim)
+		r[i] = 1.0
+	end
+end
+
+function make_e!(cone::SOC, r)
+	r[cti(cone,1)] = 1.0 
+	for i=cti(cone, 2):cti(cone, cone.dim)
+		r[i] = 0.0
+	end
+end
+
+function make_e(cone::Union{SOC,POC})
+	res = zeros(cone.offs + cone.dim)
+	make_e!(cone, res)
+	return res[cti(cone, 1):cti(cone, cone.dim)]
 end
 
 function make_e(cones::Vector{Cone})
-	return reduce(vcat, make_e(c) for c in cones)
+	tvpres = zeros(cones[end].offs + cones[end].dim)
+	make_e!(cones, tvpres)
+	return tvpres
 end
 
 # vector products
@@ -153,5 +172,9 @@ function deg(c::SOC)
 end
 
 function deg(cs::Vector{Cone})
-	return sum(deg.(cs))
+	dg = 0
+	for c in cs 
+		dg += deg(c)
+	end
+	return dg
 end
