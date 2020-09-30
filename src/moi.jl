@@ -68,46 +68,42 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
 end
 
 MOI.get(::Optimizer, ::MOI.SolverName) = "SOCP.jl"
-
-
-function MOI.is_empty(instance::Optimizer)
-    !instance.maxsense && instance.data === nothing
+MOI.supports(::Optimizer, ::MOI.Silent) = true
+function MOI.is_empty(optimizer::Optimizer)
+    !optimizer.maxsense && optimizer.data === nothing
 end
-
-function MOI.empty!(instance::Optimizer)
-    instance.maxsense = false
-    instance.data = nothing # It should already be nothing except if an error is thrown inside copy_to
-    instance.sol = nothing
+function MOI.empty!(optimizer::Optimizer)
+    optimizer.maxsense = false
+    optimizer.data = nothing # It should already be nothing except if an error is thrown inside copy_to
+    optimizer.sol = nothing
 end
-
-
-MOIU.supports_allocate_load(::Optimizer, copy_names::Bool) = !copy_names
-
 function MOI.supports(::Optimizer,
                       ::Union{MOI.ObjectiveSense,
-                              MOI.ObjectiveFunction{MOI.SingleVariable},
                               MOI.ObjectiveFunction{MOI.ScalarAffineFunction{Float64}}})
     return true
 end
 
-MOI.supports_constraint(::Optimizer, ::Type{<:SF}, ::Type{<:SS}) = true
+function MOI.supports_constraint(::Optimizer,
+                                 ::Type{MOI.VectorAffineFunction{Float64}},
+                                 ::Type{<:Union{MOI.Zeros, MOI.Nonnegatives,
+                                                MOI.SecondOrderCone}})
+    return true
+end
+
+MOIU.supports_allocate_load(::Optimizer, copy_names::Bool) = !copy_names
 
 function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike; kws...)
     return MOIU.automatic_copy_to(dest, src; kws...)
 end
-
-const ZeroCones = Union{MOI.EqualTo, MOI.Zeros}
-const LPCones = Union{MOI.GreaterThan, MOI.LessThan, MOI.Nonnegatives, MOI.Nonpositives}
-
 # Computes cone dimensions
-constroffset(cone::ConeData, ci::CI{<:MOI.AbstractFunction, <:ZeroCones}) = ci.value
-function _allocate_constraint(cone::ConeData, f, s::ZeroCones)
+constroffset(cone::ConeData, ci::CI{<:MOI.AbstractFunction, MOI.Zeros}) = ci.value
+function _allocate_constraint(cone::ConeData, f, s::MOI.Zeros)
     ci = cone.f
     cone.f += MOI.dimension(s)
     ci
 end
-constroffset(cone::ConeData, ci::CI{<:MOI.AbstractFunction, <:LPCones}) = ci.value
-function _allocate_constraint(cone::ConeData, f, s::LPCones)
+constroffset(cone::ConeData, ci::CI{<:MOI.AbstractFunction, MOI.Nonnegatives}) = ci.value
+function _allocate_constraint(cone::ConeData, f, s::MOI.Nonnegatives)
     ci = cone.l
     cone.l += MOI.dimension(s)
     ci
@@ -119,84 +115,56 @@ function _allocate_constraint(cone::ConeData, f, s::MOI.SecondOrderCone)
     cone.q += MOI.dimension(s)
     ci
 end
-constroffset(instance::Optimizer, ci::CI) = constroffset(instance.cone, ci::CI)
-function MOIU.allocate_constraint(instance::Optimizer, f::F, s::S) where {F <: MOI.AbstractFunction, S <: MOI.AbstractSet}
-    CI{F, S}(_allocate_constraint(instance.cone, f, s))
+constroffset(optimizer::Optimizer, ci::CI) = constroffset(optimizer.cone, ci::CI)
+function MOIU.allocate_constraint(optimizer::Optimizer, f::F, s::S) where {F <: MOI.AbstractFunction, S <: MOI.AbstractSet}
+    CI{F, S}(_allocate_constraint(optimizer.cone, f, s))
 end
 
 # Build constraint matrix
-scalecoef(rows, coef, minus, s) = minus ? -coef : coef
-scalecoef(rows, coef, minus, s::Union{MOI.LessThan, Type{<:MOI.LessThan}, MOI.Nonpositives, Type{MOI.Nonpositives}}) = minus ? coef : -coef
 output_index(t::MOI.VectorAffineTerm) = t.output_index
 variable_index_value(t::MOI.ScalarAffineTerm) = t.variable_index.value
 variable_index_value(t::MOI.VectorAffineTerm) = variable_index_value(t.scalar_term)
 coefficient(t::MOI.ScalarAffineTerm) = t.coefficient
 coefficient(t::MOI.VectorAffineTerm) = coefficient(t.scalar_term)
-constrrows(::MOI.AbstractScalarSet) = 1
 constrrows(s::MOI.AbstractVectorSet) = 1:MOI.dimension(s)
-constrrows(instance::Optimizer, ci::CI{<:MOI.AbstractScalarFunction, <:MOI.AbstractScalarSet}) = 1
-constrrows(instance::Optimizer, ci::CI{<:MOI.AbstractVectorFunction, MOI.Zeros}) = 1:instance.cone.eqnrows[constroffset(instance, ci)]
-constrrows(instance::Optimizer, ci::CI{<:MOI.AbstractVectorFunction, <:MOI.AbstractVectorSet}) = 1:instance.cone.ineqnrows[constroffset(instance, ci)]
-matrix(data::ModelData, s::ZeroCones) = data.b, data.IA, data.JA, data.VA
-matrix(data::ModelData, s::Union{LPCones, MOI.SecondOrderCone, MOI.ExponentialCone}) = data.h, data.IG, data.JG, data.VG
-matrix(instance::Optimizer, s) = matrix(instance.data, s)
-MOIU.load_constraint(instance::Optimizer, ci, f::MOI.SingleVariable, s) = MOIU.load_constraint(instance, ci, MOI.ScalarAffineFunction{Float64}(f), s)
-
-function MOIU.load_constraint(instance::Optimizer, ci, f::MOI.ScalarAffineFunction, s::MOI.AbstractScalarSet)
-    a = sparsevec(variable_index_value.(f.terms), coefficient.(f.terms))
-    # sparsevec combines duplicates with + but does not remove zeros created so we call dropzeros!
-    dropzeros!(a)
-    offset = constroffset(instance, ci)
-    row = constrrows(s)
-    i = offset + row
-    # The ECOS format is b - Ax ∈ cone
-    # so minus=false for b and minus=true for A
-    setconstant = MOIU.getconstant(s)
-    if s isa MOI.EqualTo
-        instance.cone.eqsetconstant[offset] = setconstant
-    else
-        instance.cone.ineqsetconstant[offset] = setconstant
-    end
-    constant = f.constant - setconstant
-    b, I, J, V = matrix(instance, s)
-    b[i] = scalecoef(row, constant, false, s)
-    append!(I, fill(i, length(a.nzind)))
-    append!(J, a.nzind)
-    append!(V, scalecoef(row, a.nzval, true, s))
-end
-
-MOIU.load_constraint(instance::Optimizer, ci, f::MOI.VectorOfVariables, s) = MOIU.load_constraint(instance, ci, MOI.VectorAffineFunction{Float64}(f), s)
+constrrows(optimizer::Optimizer, ci::CI{<:MOI.AbstractVectorFunction, MOI.Zeros}) = 1:optimizer.cone.eqnrows[constroffset(optimizer, ci)]
+constrrows(optimizer::Optimizer, ci::CI{<:MOI.AbstractVectorFunction, <:MOI.AbstractVectorSet}) = 1:optimizer.cone.ineqnrows[constroffset(optimizer, ci)]
+matrix(data::ModelData, s::MOI.Zeros) = data.b, data.IA, data.JA, data.VA
+matrix(data::ModelData, s::Union{MOI.Nonnegatives, MOI.SecondOrderCone}) = data.h, data.IG, data.JG, data.VG
+matrix(optimizer::Optimizer, s) = matrix(optimizer.data, s)
+# ECOS orders differently than MOI the second and third dimension of the exponential cone
 orderval(val, s) = val
 orderidx(idx, s) = idx
-function MOIU.load_constraint(instance::Optimizer, ci, f::MOI.VectorAffineFunction, s::MOI.AbstractVectorSet)
-    A = sparse(output_index.(f.terms), variable_index_value.(f.terms), coefficient.(f.terms))
-    # sparse combines duplicates with + but does not remove zeros created so we call dropzeros!
-    dropzeros!(A)
-    I, J, V = findnz(A)
-    offset = constroffset(instance, ci)
+expmap(i) = (1, 3, 2)[i]
+function MOIU.load_constraint(optimizer::Optimizer, ci::MOI.ConstraintIndex, f::MOI.VectorAffineFunction, s::MOI.AbstractVectorSet)
+    func = MOIU.canonical(f)
+    I = Int[output_index(term) for term in func.terms]
+    J = Int[variable_index_value(term) for term in func.terms]
+    V = Float64[-coefficient(term) for term in func.terms]
+    offset = constroffset(optimizer, ci)
     rows = constrrows(s)
     if s isa MOI.Zeros
-        instance.cone.eqnrows[offset] = length(rows)
+        optimizer.cone.eqnrows[offset] = length(rows)
     else
-        instance.cone.ineqnrows[offset] = length(rows)
+        optimizer.cone.ineqnrows[offset] = length(rows)
     end
     i = offset .+ rows
     # The ECOS format is b - Ax ∈ cone
     # so minus=false for b and minus=true for A
-    b, Is, Js, Vs = matrix(instance, s)
-    b[i] .= scalecoef(rows, orderval(f.constants, s), false, s)
+    b, Is, Js, Vs = matrix(optimizer, s)
+    b[i] .= orderval(f.constants, s)
     append!(Is, offset .+ orderidx(I, s))
     append!(Js, J)
-    append!(Vs, scalecoef(I, V, true, s))
+    append!(Vs, V)
 end
 
-function MOIU.allocate_variables(instance::Optimizer, nvars::Integer)
-    instance.cone = ConeData()
+function MOIU.allocate_variables(optimizer::Optimizer, nvars::Integer)
+    optimizer.cone = ConeData()
     VI.(1:nvars)
 end
 
-function MOIU.load_variables(instance::Optimizer, nvars::Integer)
-    cone = instance.cone
+function MOIU.load_variables(optimizer::Optimizer, nvars::Integer)
+    cone = optimizer.cone
     m = cone.l + cone.q
     IA = Int[]
     JA = Int[]
@@ -207,31 +175,24 @@ function MOIU.load_variables(instance::Optimizer, nvars::Integer)
     VG = Float64[]
     h = zeros(m)
     c = zeros(nvars)
-    instance.data = ModelData(m, nvars, IA, JA, VA, b, IG, JG, VG, h, 0., c)
+    optimizer.data = ModelData(m, nvars, IA, JA, VA, b, IG, JG, VG, h, 0., c)
 end
 
-function MOIU.allocate(instance::Optimizer, ::MOI.ObjectiveSense, sense::MOI.OptimizationSense)
-    instance.maxsense = sense == MOI.MAX_SENSE
+function MOIU.allocate(optimizer::Optimizer, ::MOI.ObjectiveSense, sense::MOI.OptimizationSense)
+    optimizer.maxsense = sense == MOI.MAX_SENSE
 end
 function MOIU.allocate(::Optimizer, ::MOI.ObjectiveFunction,
-                       ::MOI.Union{MOI.SingleVariable,
-                                   MOI.ScalarAffineFunction{Float64}})
+                       ::MOI.ScalarAffineFunction{Float64})
 end
 
 function MOIU.load(::Optimizer, ::MOI.ObjectiveSense, ::MOI.OptimizationSense)
 end
 function MOIU.load(optimizer::Optimizer, ::MOI.ObjectiveFunction,
-                   f::MOI.SingleVariable)
-    MOIU.load(optimizer,
-              MOI.ObjectiveFunction{MOI.ScalarAffineFunction{Float64}}(),
-              MOI.ScalarAffineFunction{Float64}(f))
-end
-function MOIU.load(instance::Optimizer, ::MOI.ObjectiveFunction,
                    f::MOI.ScalarAffineFunction)
     c0 = Vector(sparsevec(variable_index_value.(f.terms), coefficient.(f.terms),
-                          instance.data.n))
-    instance.data.objconstant = f.constant
-    instance.data.c = instance.maxsense ? -c0 : c0
+                          optimizer.data.n))
+    optimizer.data.objconstant = f.constant
+    optimizer.data.c = optimizer.maxsense ? -c0 : c0
     return nothing
 end
 
@@ -262,6 +223,20 @@ function MOI.optimize!(instance::Optimizer)
     instance.sol = res
 end
 
+#=
+using MathOptInterface
+const MOI = MathOptInterface
+model = MOI.instantiate(() -> Socp.Optimizer(maxit=10000); with_bridge_type=Float64)
+x = MOI.add_variable(model)
+y = MOI.add_variable(model)
+
+MOI.set(model, MOI.ObjectiveSense(), MOI.MIN_SENSE)
+MOI.set(model, MOI.ObjectiveFunction{MOI.ScalarAffineFunction{Float64}}(), MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.([2.0,-5.0], [x,y]), 0.0))
+MOI.add_constraint(model, MOI.SingleVariable(x), MOI.Interval(100.0, 200.0))
+MOI.add_constraint(model, MOI.SingleVariable(y), MOI.Interval(80.0, 170.0))
+MOI.add_constraint(model, MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.([1.0,1.0], [x,y]), 0.0), MOI.GreaterThan(200.0))
+=#
+
 const reorderval = orderval
 function MOI.get(instance::Optimizer, ::MOI.VariablePrimal, vi::VI)
     instance.sol.x[vi.value]
@@ -287,7 +262,6 @@ function MOI.get(instance::Optimizer, ::MOI.ConstraintPrimal, ci::CI{<:MOI.Abstr
     _unshift(instance, offset, scalecoef(rows, reorderval(instance.sol.s[offset .+ rows], S), false, S), ci)
 end
 
-_dual(instance, ci::CI{<:MOI.AbstractFunction, <:ZeroCones}) = instance.sol.y
 _dual(instance, ci::CI) = instance.sol.z
 function MOI.get(instance::Optimizer, ::MOI.ConstraintDual, ci::CI{<:MOI.AbstractFunction, S}) where S <: MOI.AbstractSet
     offset = constroffset(instance, ci)
