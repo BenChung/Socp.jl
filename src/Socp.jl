@@ -1,15 +1,17 @@
 module Socp
 using LinearAlgebra
-abstract type Cone end
-struct POC <: Cone # positive orthant cone
+using SparseArrays
+abstract type Cone{D} end
+struct POC{D} <: Cone{D} # positive orthant cone
 	offs::Int
-	dim::Int
+	POC(offs,dim) = new{dim}(offs)
 end
-
-struct SOC <: Cone # second order cone
+struct SOC{D} <: Cone{D} # second order cone
 	offs::Int
-	dim::Int
+	SOC(offs,dim) = new{dim}(offs)
 end
+conedim(::POC{d}) where d = d 
+conedim(::SOC{d}) where d = d
 
 struct Problem 
 	#minimize c' x

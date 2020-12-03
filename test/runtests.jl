@@ -1,5 +1,5 @@
 using Socp: Problem, State, Cone, POC, SOC, vprod, iprod, make_e
-using Socp: compute_scaling, solve_kkt, cgt, line_search, line_search_scaled
+using Socp: compute_scaling, solve_kkt, cgt
 using Socp: deg, max_step, solve_socp, Scaling, scale!, iscale!, SolverState
 using Test
 using LinearAlgebra
@@ -43,6 +43,10 @@ end
     iscale!(tcone, s, op, op2)
     println(tv2 .- op2)
     @test norm(tv2 .- op2) < 0.001
+end
+
+@testset "Squared NT Scalings" begin 
+
 end
 
 @testset "SOC programming 1" begin

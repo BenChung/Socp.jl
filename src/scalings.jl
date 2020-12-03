@@ -13,14 +13,14 @@
 			return Scaling(zeros(p.k, p.k), zeros(p.k,p.k), zeros(p.k,p.k), zeros(p.k), p.cones)
 		end
 		function Scaling(W,iW,iWiW,l,cones) 
-			md = maximum(getfield.(cones, :dim))
+			md = maximum(conedim.(cones))
 			zik,sik = zeros(md),zeros(md)
-			return new(W, iW, iWiW, l, zeros(length(cones)), zeros(cones[end].offs + cones[end].dim), zik, sik)
+			return new(W, iW, iWiW, l, zeros(length(cones)), zeros(cones[end].offs + conedim(cones[end])), zik, sik)
 		end
 	end
 
-	function compute_scaling(cone::POC, cind, scaling::Scaling, s, z)
-		for i = 1:cone.dim
+	function compute_scaling(cone::POC{dim}, cind, scaling::Scaling, s, z) where dim
+		for i = 1:dim
 			ii = cti(cone, i)
 			scaling.W[ii,ii] = sqrt(s[ii] / z[ii])
 			scaling.iW[ii,ii] = sqrt(z[ii] / s[ii])
@@ -29,16 +29,16 @@
 		end
 	end
 
-	function compute_scaling(c::SOC, cind, scaling::Scaling, s, z)
+	function compute_scaling(c::SOC{dim}, cind, scaling::Scaling, s, z) where dim
 		sik,zik = scaling.sik,scaling.zik
-		for ii = 1:c.dim
+		for ii = 1:dim
 			i = cti(c, ii)
 			sik[ii] = s[i]
 			zik[ii] = z[i]
 		end
 		onrmz = zik[1]^2 
 		onrms = sik[1]^2 
-		wl = c.dim
+		wl = dim
 		for i=2:wl
 			onrmz -= zik[i] * zik[i]
 			onrms -= sik[i] * sik[i]
@@ -56,7 +56,7 @@
 		end
 		gamma = sqrt((1 + nsum)/2)
 
-		wb = @view scaling.wbs[cti(c,1):cti(c,c.dim)]
+		wb = @view scaling.wbs[cti(c,1):cti(c,dim)]
 		wb[1] = sbk[1] + zbk[1]
 		for i = 2:wl 
 			wb[i] = sbk[i] - zbk[i]
@@ -98,11 +98,11 @@
 		scaling.l[ic1] = gamma*tmv1
 	end
 
-	function compute_scaling(cones::Vector{Cone}, scaling::Scaling, s, z)
+	function compute_scaling(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, scaling::Scaling, s, z)
 		# assume that cones is in the order POC ... POC SOC ... SOC
 		odim = 0
 		for cone in cones
-			odim += cone.dim
+			odim += typeof(cone).parameters[1]
 		end
 		for i=1:length(cones)
 			cone = cones[i]
@@ -112,60 +112,60 @@
 		return scaling
 	end 
 
-	function scale!(cone::POC, cind, scl, s, op)
+	function scale!(cone::POC{dim}, cind, scl, s, op) where dim
 		wb = scl.wbs
-		for i=cti(cone,1):cti(cone, cone.dim)
+		for i=cti(cone,1):cti(cone, dim)
 			op[i] = wb[i]*s[i]
 		end
 	end
 
-	function iscale!(cone::POC, cind, scl, s, op)
+	function iscale!(cone::POC{dim}, cind, scl, s, op) where dim
 		wb = scl.wbs
-		for i=cti(cone,1):cti(cone, cone.dim)
+		for i=cti(cone,1):cti(cone, dim)
 			op[i] = 1/wb[i]*s[i]
 		end
 	end
 
-	function scale!(cone::SOC, cind, scl, s, op)
+	function scale!(cone::SOC{dim}, cind, scl, s, op) where dim
 		wb = scl.wbs
 		mu = scl.mu[cind]
 		del = 0.0
-		for i=cti(cone, 2):cti(cone, cone.dim)
+		for i=cti(cone, 2):cti(cone, dim)
 			del += wb[i]*s[i]
 		end
 
 		ind1 = cti(cone, 1)
 		op[ind1] = mu * (wb[ind1]*s[ind1] + del)
 		cst = (s[ind1] + del/(1+wb[ind1]))
-		for i=cti(cone, 2):cti(cone, cone.dim)
+		for i=cti(cone, 2):cti(cone, dim)
 			op[i] = mu * (s[i] + cst*wb[i])
 		end
 	end
 
-	function iscale!(cone::SOC, cind, scl, s, op)
+	function iscale!(cone::SOC{dim}, cind, scl, s, op) where dim
 		wb = scl.wbs
 		mu = scl.mu[cind]
 		del = 0.0
-		for i=cti(cone, 2):cti(cone, cone.dim)
+		for i=cti(cone, 2):cti(cone, dim)
 			del += wb[i]*s[i]
 		end
 
 		ind1 = cti(cone, 1)
 		op[ind1] = 1/mu * (wb[ind1]*s[ind1] - del)
 		cst = (-s[ind1] + del/(1+wb[ind1]))
-		for i=cti(cone, 2):cti(cone, cone.dim)
+		for i=cti(cone, 2):cti(cone, dim)
 			op[i] = 1/mu * (s[i] + cst*wb[i])
 		end
 	end
 
 	# computes W s
-	function scale!(cones::Vector{Cone}, scl::Scaling, s, op)
+	function scale!(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, scl::Scaling, s, op)
 		for i=1:length(cones)
 			scale!(cones[i], i, scl, s, op)
 		end
 	end
 	# computes W^-1 s
-	function iscale!(cones::Vector{Cone}, scl::Scaling, s, op)
+	function iscale!(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, scl::Scaling, s, op)
 		for i=1:length(cones)
 			iscale!(cones[i], i, scl, s, op)
 		end
@@ -180,6 +180,6 @@
 	function update_scaling!(cone::SOC, scaling, s, z)
 	end
 
-	function update_scaling!(cones::Vector{Cone}, scaling, s, z)
+	function update_scaling!(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, scaling, s, z)
 
 	end

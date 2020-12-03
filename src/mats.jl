@@ -1,4 +1,4 @@
-function max_step(cones::Vector{Cone}, x)
+function max_step(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, x)
 	maxim = typemin(Float64)
 	for cone in cones 
 		val = max_step(cone, x)
@@ -9,9 +9,9 @@ function max_step(cones::Vector{Cone}, x)
 	return maxim
 end
 
-function max_step(cone::POC, x)
+function max_step(cone::POC{dim}, x) where dim
 	minim = typemax(Float64)
-	for i=cti(cone, 1):cti(cone,cone.dim)
+	for i=cti(cone, 1):cti(cone,dim)
 		if x[i] < minim 
 			minim = x[i]
 		end
@@ -19,9 +19,9 @@ function max_step(cone::POC, x)
 	return -minim
 end
 
-function max_step(cone::SOC, x)
+function max_step(cone::SOC{dim}, x) where dim
 	sqnrm = 0.0
-	for i=cti(cone, 2):cti(cone,cone.dim)
+	for i=cti(cone, 2):cti(cone,dim)
 		sqnrm += x[i]^2
 	end
 	return sqrt(sqnrm) - x[cti(cone, 1)]
@@ -38,18 +38,18 @@ function compute_step(cones, l, ds, dz)
 	end
 	return step
 end
-function scale2(cones::Vector{Cone}, l, x)
+function scale2(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, l, x)
 	return vcat((scale2(c,l,x) for c in cones)...)
 end
 
-function scale2(c::POC, l, x)
-	rng = cti(c, 1):cti(c, c.dim)
+function scale2(c::POC{dim}, l, x) where dim
+	rng = cti(c, 1):cti(c, dim)
 	return x[rng]/l[rng]
 end
 
-function scale2(c::SOC, li, xi)
-	ln = @view li[cti(c,1):cti(c,c.dim)]
-	x = @view xi[cti(c,1):cti(c,c.dim)]
+function scale2(c::SOC{dim}, li, xi) where dim
+	ln = @view li[cti(c,1):cti(c,dim)]
+	x = @view xi[cti(c,1):cti(c,dim)]
 	a = 1/sqrt(ln[1]^2 - sum(ln[2:end].^2))
 	l = ln .* a
 	r1 = l[1]*x[1] - dot(l[2:end], x[2:end])
@@ -58,7 +58,7 @@ function scale2(c::SOC, li, xi)
 	return a.*[r1; r2]
 end
 
-function scmax(cones::Vector{Cone}, l, x)
+function scmax(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, l, x)
 	mxv = typemin(Float64)
 	for cone in cones
 		val = scmax(cone, l, x)
@@ -69,9 +69,9 @@ function scmax(cones::Vector{Cone}, l, x)
 	return mxv
 end
 
-function scmax(c::POC, l, x)
+function scmax(c::POC{dim}, l, x) where dim
 	mxv = typemin(Float64)
-	for i=cti(c, 1):cti(c, c.dim)
+	for i=cti(c, 1):cti(c, dim)
 		val = -x[i]/l[i]
 		if val > mxv
 			mxv = val
@@ -80,60 +80,28 @@ function scmax(c::POC, l, x)
 	return mxv
 end
 
-function scmax(c::SOC, li, xi)
+function scmax(c::SOC{dim}, li, xi) where dim
 	# a = 1/sqrt(ln[1]^2 - sum(ln[2:end].^2))
 	i1 = cti(c,1)
 	ai = li[i1]^2
-	for ii = cti(c,2):cti(c,c.dim)
+	for ii = cti(c,2):cti(c,dim)
 		ai -= li[ii]^2
 	end
 	a = 1/sqrt(ai)
 
 	# r1 = a*ln[1]*x[1] - dot(a*ln[2:end], x[2:end])
 	r1 = a*li[i1]*xi[i1]
-	for ii = cti(c,2):cti(c,c.dim)
+	for ii = cti(c,2):cti(c,dim)
 		r1 -= a*li[ii]*xi[ii]
 	end
 
 	# r2 = a .* (x[2:end] - cst * a*ln[2:end])
 	cst = (r1 + xi[i1])/(a*li[i1] + 1)
 	r2s = 0.0
-	for ii = cti(c,2):cti(c,c.dim)
+	for ii = cti(c,2):cti(c,dim)
 		r2s += (a * (xi[ii] - cst * a * li[ii]))^2
 	end
 	return sqrt(r2s) - a * r1 # norm(r2) - a*r1
-end
-
-const t = 0.9
-const maxiters = 1000
-
-function line_search(cones, z, dz, s, ds)
-	h = 1.0
-	iter = 0
-	cdz, cds = similar(z), similar(s)
-	cdz .= dz
-	cds .= ds
-	while (!cgt(cones, z, cdz) || !cgt(cones, s, cds)) && iter < maxiters
-		rmul!(cdz, t)
-		rmul!(cds, t)
-		h *= t
-		iter += 1
-	end
-	return h
-end
-
-function line_search_scaled(cones, scaling, dz, ds)	
-	h = 1.0
-	iter = 0
-	W,iW,l = scaling.W,scaling.iW,scaling.l
-	sds, sdz = iW' * ds/0.99, W * dz/0.99
-	while (!cgt(cones, l, sds) || !cgt(cones, l, sdz)) && iter < maxiters
-		rmul!(sds, t)
-		rmul!(sdz, t)
-		h *= t
-		iter += 1
-	end
-	return h
 end
 
 mutable struct KKTState
