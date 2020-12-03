@@ -1,6 +1,6 @@
 using Socp: Problem, State, Cone, POC, SOC, vprod, iprod, make_e
-using Socp: compute_scaling, solve_kkt, cgt
-using Socp: deg, max_step, solve_socp, Scaling, scale!, iscale!, SolverState
+using Socp: compute_scaling, compute_sqscaling, solve_kkt, cgt
+using Socp: deg, max_step, solve_socp, Scaling, SqrScaling, scale!, iscale!, SolverState
 using Test
 using LinearAlgebra
 
@@ -28,7 +28,6 @@ end
     tv1 = Float64[1,1,1,9,2,3]
     tv2 = Float64[1,1,1,22,5,6]
     tcone = (POC(0,3), SOC(3,3))
-    tid = make_e(tcone)
     s = Scaling(zeros(6,6),zeros(6,6),zeros(6,6),zeros(6),tcone)
     compute_scaling(tcone, s, tv1, tv2)
     sca,isca,pt = s.W,s.iW,s.l
@@ -46,7 +45,33 @@ end
 end
 
 @testset "Squared NT Scalings" begin 
+    tv1 = Float64[1,1,1,9,2,3]
+    tv2 = Float64[1,1,1,22,5,6]
+    tcone = (POC(0,3), SOC(3,3))
+    s = Scaling(zeros(6,6),zeros(6,6),zeros(6,6),zeros(6),tcone)
+    compute_scaling(tcone, s, tv1, tv2)
+    s2 = SqrScaling(zeros(6,6), zeros(6), tcone)
+    compute_sqscaling(tcone, s2, tv1, tv2)
+    @test norm(s.l .- s2.l) < 0.0001
+    @test norm(s.wbs .- s2.wbs) < 0.0001
+    @test norm(s.mu .- s2.mu) < 0.0001
+    @test norm(norm(s.iWiW .- s2.iWiW)) < 0.01
 
+	cones = (POC(0,1), SOC(1,3))
+    u=[3.414213562373095, 2.414213562373095, 1.0, 1.0]
+    v=[1.414213562373095, 2.414213562373095, -1.0, -1.0]
+    s = Scaling(zeros(4,4),zeros(4,4),zeros(4,4),zeros(4),cones)
+    compute_scaling(cones, s, u, v)
+    s2 = SqrScaling(zeros(4,4), zeros(4), cones)
+    compute_sqscaling(cones, s2, u, v)
+    @test norm(s.l .- s2.l) < 0.0001
+    @test norm(s.wbs .- s2.wbs) < 0.0001
+    @test norm(s.mu .- s2.mu) < 0.0001
+    println("old")
+    println(s.iWiW)
+    println("new")
+    println(s2.iWiW)
+    @test norm(norm(s.iWiW .- s2.iWiW)) < 0.01
 end
 
 @testset "SOC programming 1" begin
@@ -151,7 +176,7 @@ end
 		G[i+1,2*n+i] = -1.0
 	end	
 	h = zeros(n)
-	cones = (SOC(0,n),)
+	cones = (Socp.SOC(0,n),)
 	prob = Problem(c, A, b, G, h, cones)
 	ss = SolverState(prob)
 	soln = solve_socp(prob, ss)

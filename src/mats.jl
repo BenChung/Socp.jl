@@ -114,13 +114,12 @@ mutable struct KKTState
 	end
 end
 
-function solve_kkt(pr::Problem, s::State, scaling::Scaling, 
+function solve_kkt(pr::Problem, s::State, scaling::SqrScaling, 
 				   dx::Vector{Float64}, dy::Vector{Float64}, dz::Vector{Float64}, ds::Vector{Float64}, 
 				   cx::Vector{Float64}, cy::Vector{Float64}, cz::Vector{Float64}, cs::Vector{Float64}, mehrotra::Bool,
 		ss::KKTState)
 	n,m,k = pr.n,pr.m,pr.k
-	W,iW,l = scaling.W,scaling.iW,scaling.l
-
+	l = scaling.l
 
 	ipr = ss.ipr
 	temp1 = ss.temp1

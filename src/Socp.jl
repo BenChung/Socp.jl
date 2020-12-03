@@ -1,6 +1,7 @@
 module Socp
 using LinearAlgebra
 using SparseArrays
+using StaticArrays
 using Unrolled
 abstract type Cone{D} end
 struct POC{D} <: Cone{D} # positive orthant cone
@@ -62,8 +63,8 @@ struct State
 	end
 end
 
-include("scalings.jl")
 include("sqrscalings.jl")
+include("scalings.jl")
 include("vectors.jl")
 include("mats.jl")
 include("solver.jl")

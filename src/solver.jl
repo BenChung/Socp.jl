@@ -1,5 +1,5 @@
 struct SolverState
-	scaling::Scaling
+	scaling::SqrScaling
 	kktstate::KKTState
 	initm::Matrix{Float64}
 	initv::Vector{Float64}
@@ -20,7 +20,7 @@ struct SolverState
 	rs::Vector{Float64}
 
 	function SolverState(pr::Problem)
-		scaling = Scaling(pr)
+		scaling = SqrScaling(pr)
 		ss = KKTState(pr)
 		n = pr.n
 		m = pr.m
@@ -111,8 +111,8 @@ function solve_socp(prob::Problem, ss::SolverState)
 #	println("$initials $inits $initz")
 	state = State(prob, initials[1:n], initials[n+1:n+m], initz, inits)
 	for i=1:40
-		scaling = compute_scaling(cones, scaling, state.s, state.z)
-		W,iW,l = scaling.W, scaling.iW, scaling.l
+		scaling = compute_sqscaling(cones, scaling, state.s, state.z)
+		l = scaling.l
 		# solve affine direction
 		# dx = prob.A'*state.y .+ prob.G'*state.z .+ prob.c
 		mul!(nt1, prob.A', state.y)

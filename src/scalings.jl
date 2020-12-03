@@ -100,7 +100,6 @@
 
 	@unroll function compute_scaling(cones::Tuple{Vararg{Cone}}, scaling::Scaling, s, z)
 		# assume that cones is in the order POC ... POC SOC ... SOC
-		odim = unrolled_reduce(+, 0, unrolled_map(conedim, cones))
 		i=1
 		@unroll for cone in cones
 			compute_scaling(cone, i, scaling, s, z)
@@ -157,7 +156,7 @@
 	end
 
 	# computes W s
-	@unroll function scale!(cones::Tuple{Vararg{Cone}}, scl::Scaling, s, op)
+	@unroll function scale!(cones::Tuple{Vararg{Cone}}, scl::Union{SqrScaling, Scaling}, s, op)
 		i=1
 		@unroll for cone in cones
 			scale!(cone, i, scl, s, op)
@@ -165,7 +164,7 @@
 		end
 	end
 	# computes W^-1 s
-	@unroll function iscale!(cones::Tuple{Vararg{Cone}}, scl::Scaling, s, op)
+	@unroll function iscale!(cones::Tuple{Vararg{Cone}}, scl::Union{SqrScaling, Scaling}, s, op)
 		i=1
 		@unroll for cone in cones
 			iscale!(cone, i, scl, s, op)
