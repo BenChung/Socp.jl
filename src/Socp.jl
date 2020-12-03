@@ -1,6 +1,7 @@
 module Socp
 using LinearAlgebra
 using SparseArrays
+using Unrolled
 abstract type Cone{D} end
 struct POC{D} <: Cone{D} # positive orthant cone
 	offs::Int
@@ -10,10 +11,10 @@ struct SOC{D} <: Cone{D} # second order cone
 	offs::Int
 	SOC(offs,dim) = new{dim}(offs)
 end
-conedim(::POC{d}) where d = d 
-conedim(::SOC{d}) where d = d
+@generated conedim(::POC{d}) where d = d 
+@generated conedim(::SOC{d}) where d = d
 
-struct Problem 
+struct Problem{C <: Tuple{Vararg{Cone}}}
 	#minimize c' x
 	c::Vector{Float64} # dim n
 
@@ -26,14 +27,14 @@ struct Problem
 	h::Vector{Float64} # dim k
 
 	# wrt cones
-	cones::Vector{Cone}
+	cones::C
 
 	#dimensions
 	n::Int
 	m::Int
 	k::Int
 
-	Problem(c, A, b, G, h, cones) = begin
+	Problem(c, A, b, G, h, cones::C) where C <: Tuple{Vararg{Cone}} = begin
 	    n = length(c)
 	    m = size(A)[1]
 	    @assert length(b) == m
@@ -42,7 +43,7 @@ struct Problem
 	    k = size(G)[1]
 	    @assert length(h) == k
 	    #todo: check that each variable appears in a type of cone only once
-	    return new(c, A, b, G, h, cones, n, m, k)
+	    return new{C}(c, A, b, G, h, cones, n, m, k)
 	end
 end
 
@@ -62,6 +63,7 @@ struct State
 end
 
 include("scalings.jl")
+include("sqrscalings.jl")
 include("vectors.jl")
 include("mats.jl")
 include("solver.jl")

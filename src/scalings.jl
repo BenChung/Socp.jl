@@ -98,15 +98,13 @@
 		scaling.l[ic1] = gamma*tmv1
 	end
 
-	function compute_scaling(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, scaling::Scaling, s, z)
+	@unroll function compute_scaling(cones::Tuple{Vararg{Cone}}, scaling::Scaling, s, z)
 		# assume that cones is in the order POC ... POC SOC ... SOC
-		odim = 0
-		for cone in cones
-			odim += typeof(cone).parameters[1]
-		end
-		for i=1:length(cones)
-			cone = cones[i]
+		odim = unrolled_reduce(+, 0, unrolled_map(conedim, cones))
+		i=1
+		@unroll for cone in cones
 			compute_scaling(cone, i, scaling, s, z)
+			i += 1
 		end
 		mul!(scaling.iWiW, scaling.iW, scaling.iW')
 		return scaling
@@ -159,15 +157,19 @@
 	end
 
 	# computes W s
-	function scale!(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, scl::Scaling, s, op)
-		for i=1:length(cones)
-			scale!(cones[i], i, scl, s, op)
+	@unroll function scale!(cones::Tuple{Vararg{Cone}}, scl::Scaling, s, op)
+		i=1
+		@unroll for cone in cones
+			scale!(cone, i, scl, s, op)
+			i+=1
 		end
 	end
 	# computes W^-1 s
-	function iscale!(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, scl::Scaling, s, op)
-		for i=1:length(cones)
-			iscale!(cones[i], i, scl, s, op)
+	@unroll function iscale!(cones::Tuple{Vararg{Cone}}, scl::Scaling, s, op)
+		i=1
+		@unroll for cone in cones
+			iscale!(cone, i, scl, s, op)
+			i+=1
 		end
 	end
 

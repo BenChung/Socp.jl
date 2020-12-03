@@ -4,8 +4,8 @@ end
 
 #e vector generation
 
-function make_e!(cones::Union{Vector{Cone}, Vector{Cone{T}} where T}, r)
-	for c in cones 
+@unroll function make_e!(cones::Tuple{Vararg{Cone}}, r)
+	@unroll for c in cones 
 		make_e!(c, r)
 	end
 end
@@ -29,7 +29,7 @@ function make_e(cone::Union{SOC,POC})
 	return @view res[cti(cone, 1):cti(cone, conedim(cone))]
 end
 
-function make_e(cones::Union{Vector{Cone},Vector{Cone{d}} where d})
+function make_e(cones::Tuple{Vararg{Cone}})
 	tvpres = zeros(cones[end].offs + conedim(cones[end]))
 	make_e!(cones, tvpres)
 	return tvpres
@@ -49,7 +49,7 @@ function vprod(cone::SOC{dim}, u, v) where dim
 	return res
 end
 
-function vprod(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, u, v)
+@unroll function vprod(cones::Tuple{Vararg{Cone}}, u, v)
 	tvpres = zeros(cones[end].offs + conedim(cones[end]))
 	vprod!(cones, tvpres, u, v)
 	return tvpres
@@ -74,8 +74,8 @@ function vprod!(cone::SOC{dim}, t, u, v) where dim
 	end 
 end
 
-function vprod!(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, t, u, v)
-	for cone in cones 
+@unroll function vprod!(cones::Tuple{Vararg{Cone}}, t, u, v)
+	@unroll for cone in cones 
 		vprod!(cone, t, u, v)
 	end
 end
@@ -88,9 +88,9 @@ function iprod(cone::Cone{dim}, lam::Vector{Float64}, v::Vector{Float64}) where 
 	return tres
 end
 
-function iprod(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, u, v)
+@unroll function iprod(cones::Tuple{Vararg{Cone}}, u, v)
 	tres = zeros(conedim(cones[end])+cones[end].offs)
-	for c in cones 
+	@unroll for c in cones 
 		iprod!(c, tres, u, v)
 	end
 	return tres
@@ -124,8 +124,8 @@ function iprod!(cone::SOC{dim}, t, lam::Vector{Float64}, v::Vector{Float64}) whe
 	end
 end
 
-function iprod!(cones::Vector{Cone}, t, u, v)
-	for cone in cones 
+@unroll function iprod!(cones::Tuple{Vararg{Cone}}, t, u, v)
+	@unroll for cone in cones 
 		iprod!(cone, t, u, v)
 	end
 end
@@ -151,8 +151,8 @@ function cgt(c::SOC{dim}, x, dx) where dim
 	return sqrt(tot) <= x[cti(c, 1)] + dx[cti(c, 1)]
 end
 
-function cgt(cs::Union{Vector{Cone},Vector{Cone{d}} where d}, x, dx)
-	for c in cs 
+@unroll function cgt(cs::Tuple{Vararg{Cone}}, x, dx)
+	@unroll for c in cs 
 		if !cgt(c, x, dx) 
 			return false
 		end
@@ -170,9 +170,9 @@ function deg(c::SOC)
 	return 1
 end
 
-function deg(cs::Union{Vector{Cone},Vector{Cone{d}} where d})
+@unroll function deg(cs::Tuple{Vararg{Cone}})
 	dg = 0
-	for c in cs 
+	@unroll for c in cs 
 		dg += deg(c)
 	end
 	return dg

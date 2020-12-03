@@ -1,6 +1,6 @@
-function max_step(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, x)
+@unroll function max_step(cones::Tuple{Vararg{Cone}}, x)
 	maxim = typemin(Float64)
-	for cone in cones 
+	@unroll for cone in cones 
 		val = max_step(cone, x)
 		if val > maxim 
 			maxim = val
@@ -38,29 +38,10 @@ function compute_step(cones, l, ds, dz)
 	end
 	return step
 end
-function scale2(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, l, x)
-	return vcat((scale2(c,l,x) for c in cones)...)
-end
 
-function scale2(c::POC{dim}, l, x) where dim
-	rng = cti(c, 1):cti(c, dim)
-	return x[rng]/l[rng]
-end
-
-function scale2(c::SOC{dim}, li, xi) where dim
-	ln = @view li[cti(c,1):cti(c,dim)]
-	x = @view xi[cti(c,1):cti(c,dim)]
-	a = 1/sqrt(ln[1]^2 - sum(ln[2:end].^2))
-	l = ln .* a
-	r1 = l[1]*x[1] - dot(l[2:end], x[2:end])
-	cst = (r1 + x[1])/(l[1] + 1)
-	r2 = (x[2:end] - cst * l[2:end])
-	return a.*[r1; r2]
-end
-
-function scmax(cones::Union{Vector{Cone},Vector{Cone{d}} where d}, l, x)
+@unroll function scmax(cones::Tuple{Vararg{Cone}}, l, x)
 	mxv = typemin(Float64)
-	for cone in cones
+	@unroll for cone in cones
 		val = scmax(cone, l, x)
 		if val > mxv
 			mxv = val

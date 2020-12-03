@@ -7,7 +7,7 @@ using LinearAlgebra
 @testset "Vector operations" begin
     tv1 = Float64[1,1,1,1,2,3]
     tv2 = Float64[1,1,1,1,5,6]
-    tcone = [POC(0,3), SOC(3,3)]
+    tcone = (POC(0,3), SOC(3,3))
     tid = make_e(tcone)
     @test vprod(tcone, tv1, tv1) == [1,1,1,14,4,6]
     @test vprod(tcone, tv1, tv2) == [1,1,1,29,7,9]
@@ -21,15 +21,15 @@ using LinearAlgebra
 
     @test max_step(POC(0,3), [1,2,3]) == -1
     @test max_step(SOC(0,3), [1,2,3]) == sqrt(2^2 + 3^2)-1.0
-    @test max_step([POC(0,3), SOC(0,3)], [1,2,3]) == sqrt(2^2 + 3^2)-1.0
+    @test max_step((POC(0,3), SOC(0,3)), [1,2,3]) == sqrt(2^2 + 3^2)-1.0
 end
 
 @testset "Nesterov-Todd Scalings" begin
     tv1 = Float64[1,1,1,9,2,3]
     tv2 = Float64[1,1,1,22,5,6]
-    tcone = [POC(0,3), SOC(3,3)]
+    tcone = (POC(0,3), SOC(3,3))
     tid = make_e(tcone)
-    s = Scaling(zeros(6,6),zeros(6,6),zeros(6,6),zeros(6),[POC(0,3), SOC(3,3)])
+    s = Scaling(zeros(6,6),zeros(6,6),zeros(6,6),zeros(6),tcone)
     compute_scaling(tcone, s, tv1, tv2)
     sca,isca,pt = s.W,s.iW,s.l
     tvp1 = isca' * tv1 
@@ -57,7 +57,7 @@ end
 
 	G = [0 0 1.0; 0 0 -1; 0 -1 0; -1 0 0]
 	h = [5.0,0.0,0.0,0.0]
-	cones = Cone[POC(0,1), SOC(1,3)]
+	cones = (POC(0,1), SOC(1,3))
 	prob = Problem(c, A, b, G, h, cones)
 	ss = SolverState(prob)
 	soln = solve_socp(prob, ss)
@@ -79,7 +79,7 @@ end
 		 -1.0 -9.0 -2.0;
 		 1.0 19.0 -3.0]
 	h = [-12.0, -3.0, -2.0, 27.0, 0.0, 3.0, -42.0]
-	cones = Cone[SOC(0,3), SOC(3,4)]
+	cones = (SOC(0,3), SOC(3,4))
 	prob = Problem(c, A, b, G, h, cones)
 	ss = SolverState(prob)
 	soln = solve_socp(prob, ss)
@@ -100,7 +100,7 @@ end
 		 -1.0 -9.0 -2.0;
 		 1.0 19.0 -3.0]
 	h = [-12.0, -3.0, -2.0, 27.0, 0.0, 3.0, -42.0]
-	cones = Cone[SOC(0,3), SOC(3,4)]
+	cones = (SOC(0,3), SOC(3,4))
 	prob = Problem(c, A, b, G, h, cones)
 	ss = SolverState(prob)
 	soln = solve_socp(prob, ss)
@@ -151,7 +151,7 @@ end
 		G[i+1,2*n+i] = -1.0
 	end	
 	h = zeros(n)
-	cones = Cone[SOC(0,n)]
+	cones = (SOC(0,n),)
 	prob = Problem(c, A, b, G, h, cones)
 	ss = SolverState(prob)
 	soln = solve_socp(prob, ss)
