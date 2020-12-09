@@ -3,6 +3,8 @@ using LinearAlgebra
 using SparseArrays
 using StaticArrays
 using Unrolled
+using SuiteSparse
+
 abstract type Cone{D} end
 struct POC{D} <: Cone{D} # positive orthant cone
 	offs::Int
@@ -20,11 +22,11 @@ struct Problem{C <: Tuple{Vararg{Cone}}}
 	c::Vector{Float64} # dim n
 
 	# s.t. A x = b
-	A::Matrix{Float64} # dim m x n 
+	A::SparseMatrixCSC{Float64} # dim m x n 
 	b::Vector{Float64} # dim m
 
 	# s.t. G x + s = h
-	G::Matrix{Float64} # dim k x n
+	G::SparseMatrixCSC{Float64} # dim k x n
 	h::Vector{Float64} # dim k
 
 	# wrt cones

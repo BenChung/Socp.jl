@@ -69,14 +69,11 @@ function solve_socp(prob::Problem, ss::SolverState)
     open("cones.txt", "w") do f
     	println(f, prob.cones)
     end
-	=#
-    initm[1:n,n+1:n+m] .= prob.A'
-    initm[1:n,n+m+1:n+m+k] .= prob.G'
-    initm[n+1:n+m,1:n] .= prob.A
-    initm[n+m+1:n+m+k,1:n] .= prob.G
-    for i=n+m+1:n+m+k 
-    	initm[i,i] = -1.0
-    end
+	=# 
+	r1 = hcat(spzeros(n,n), prob.A', prob.G')
+	r2 = hcat(prob.A, spzeros(m,m), spzeros(m, k))
+	r3 = hcat(prob.G, spzeros(k,m), sparse(-I, k, k))
+	idmat = vcat(r1, r2, r3)
     initv[1:n] .= (-).(prob.c)
     initv[n+1:n+m] .= prob.b 
     initv[n+m+1:n+m+k] .= prob.h
@@ -89,7 +86,7 @@ function solve_socp(prob::Problem, ss::SolverState)
     end
     =#
 
-	initials::Vector{Float64} = initm\initv
+	initials::Vector{Float64} = idmat\initv
 
 	make_e!(cones, idel)
 	iz::Vector{Float64} = initials[n+m+1:n+m+k]
@@ -112,6 +109,7 @@ function solve_socp(prob::Problem, ss::SolverState)
 	state = State(prob, initials[1:n], initials[n+1:n+m], initz, inits)
 	for i=1:40
 		scaling = compute_sqscaling(cones, scaling, state.s, state.z)
+		s2 = compute_scaling(cones, Scaling(prob), state.s, state.z)
 		l = scaling.l
 		# solve affine direction
 		# dx = prob.A'*state.y .+ prob.G'*state.z .+ prob.c
@@ -131,7 +129,7 @@ function solve_socp(prob::Problem, ss::SolverState)
 			break
 		end
 		rmul!(dx, -1.0); rmul!(dy, -1.0); rmul!(dz, -1.0); rmul!(ds, -1.0)
-		solve_kkt(prob, state, scaling, dx, dy, dz, ds, rx,ry,rz,rs, true, ks)
+		solve_kkt(prob, state, scaling, s2, dx, dy, dz, ds, rx,ry,rz,rs, true, ks)
 		scale!(prob.cones, scaling, rz, kt3)
 		iscale!(prob.cones, scaling, rs, kt2)
 		t = compute_step(cones, l, kt3, kt2)
@@ -145,7 +143,7 @@ function solve_socp(prob::Problem, ss::SolverState)
 		mul!(kt2, sig*mu, idel)
 		ds .+= kt2 .- kt1
 		rmul!(dx, scfact); rmul!(dy, scfact); rmul!(dz, scfact)
-		solve_kkt(prob, state, scaling, dx, dy, dz, ds, rx,ry,rz,rs, false, ks)
+		solve_kkt(prob, state, scaling, s2, dx, dy, dz, ds, rx,ry,rz,rs, false, ks)
 
 		scale!(prob.cones, scaling, rz, kt3)
 		iscale!(prob.cones, scaling, rs, kt2)

@@ -114,7 +114,7 @@ mutable struct KKTState
 	end
 end
 
-function solve_kkt(pr::Problem, s::State, scaling::SqrScaling, 
+function solve_kkt(pr::Problem, s::State, scaling::SqrScaling, s2::Scaling, 
 				   dx::Vector{Float64}, dy::Vector{Float64}, dz::Vector{Float64}, ds::Vector{Float64}, 
 				   cx::Vector{Float64}, cy::Vector{Float64}, cz::Vector{Float64}, cs::Vector{Float64}, mehrotra::Bool,
 		ss::KKTState)
@@ -132,15 +132,42 @@ function solve_kkt(pr::Problem, s::State, scaling::SqrScaling,
 	prf5 = ss.prf5
 	iR = ss.iR
 	siR = ss.siR
-	prf0 = scaling.iWiW
+	prf0 = s2.iWiW
 	et = ss.eyetgt
 	iL = ss.iL
 	aa = ss.AA
 
+	mul!(prf1, pr.G', prf0) #prf1 = G'*W^-1 * W^-T 
+	i1 = pr.G' * scaling.iWiW * pr.G
+	if ss.issng
+		i1 .+= aa
+	end
+	try 
+		LLfactor = cholesky(i1)
+		# do the low rank updates
+		modify_factors!(pr.cones, LLfactor, scaling, pr.G)
+		iR = LLfactor\et
+		mul!(siR, pr.A, iR)
+	catch e 
+		if isa(e, PosDefException) || isa(e, SingularException)
+			mul!(aa, pr.A', pr.A)
+			i1 .+= aa
+			LLfactor = cholesky(i1)
+			ss.issng = true		
+			# do the low rank updates
+			modify_factors!(pr.cones, LLfactor, scaling, pr.G)
+			iR = LLfactor\et
+			#ldiv!(iR, LLfactor, et)
+			mul!(siR, pr.A, iR)
+		else 
+			rethrow(e)
+		end
+	end
+#=
 	if mehrotra 
 		mul!(prf1, pr.G', prf0) #prf1 = G'*W^-1 * W^-T 
 		mul!(prf3, prf1, pr.G) #prf3 = G'*W^-1*W^-T*G 
-		if ss.issng # prf3 will be not pos def if it wasn't before
+		if ss.issng # prf3 won't be pos def now if it wasn't before
 			prf3 .+= aa # we know that aa's been populated by now
 			L = cholesky!(ss.hp3)
 		else
@@ -160,13 +187,16 @@ function solve_kkt(pr::Problem, s::State, scaling::SqrScaling,
 		ldiv!(iR, L, et) #iR = L^-T L^-1
 		mul!(siR, pr.A, iR)
 	end
-
+=#
 	iprod!(pr.cones, ipr, l, ds)
 	scale!(pr.cones, scaling, ipr, temp1)
 	bx = dx
 	by = dy
 	temp2 .= dz .- temp1
-	mul!(prf2, prf1, temp2)
+	#iscale!(pr.cones, scaling, temp2, temp2)
+	#iscale!(pr.cones, scaling, temp2, temp2)
+	mul!(prf2, prf1, temp2) #prf2 = G'*W^-1 * W^-T*(dz - temp1)
+	#println("A $prrf2 B $prf2")
 	prf2 .+= bx
 	At = pr.A'
 	if ss.issng
@@ -189,7 +219,8 @@ function solve_kkt(pr::Problem, s::State, scaling::SqrScaling,
 	mul!(cx, iR, prf2)
 	mul!(temp1, pr.G, cx)
 	temp1 .-= temp2
-	mul!(cz, prf0, temp1)
+	iscale!(pr.cones, scaling, temp1, cz)
+	iscale!(pr.cones, scaling, cz, cz)
 	scale!(pr.cones, scaling, cz, temp1)
 	ipr .-= temp1
 	scale!(pr.cones, scaling, ipr, cs)

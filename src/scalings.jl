@@ -132,8 +132,8 @@
 		end
 
 		ind1 = cti(cone, 1)
-		op[ind1] = mu * (wb[ind1]*s[ind1] + del)
 		cst = (s[ind1] + del/(1+wb[ind1]))
+		op[ind1] = mu * (wb[ind1]*s[ind1] + del)
 		for i=cti(cone, 2):cti(cone, dim)
 			op[i] = mu * (s[i] + cst*wb[i])
 		end
@@ -148,8 +148,8 @@
 		end
 
 		ind1 = cti(cone, 1)
-		op[ind1] = 1/mu * (wb[ind1]*s[ind1] - del)
 		cst = (-s[ind1] + del/(1+wb[ind1]))
+		op[ind1] = 1/mu * (wb[ind1]*s[ind1] - del)
 		for i=cti(cone, 2):cti(cone, dim)
 			op[i] = 1/mu * (s[i] + cst*wb[i])
 		end
