@@ -53,7 +53,7 @@ end
     tcone = (POC(0,3), SOC(3,3))
     s = Scaling(zeros(6,6),zeros(6,6),zeros(6,6),zeros(6),tcone)
     compute_scaling(tcone, s, tv1, tv2)
-    s2 = SqrScaling(Diagonal(zeros(6)), zeros(6), tcone, 3)
+    s2 = SqrScaling(Diagonal(zeros(6)), Diagonal(zeros(6)), zeros(6), tcone, 3, sparse(I, 6, 6))
     compute_sqscaling(tcone, s2, tv1, tv2)
     @test norm(s.l .- s2.l) < 0.0001
     @test norm(s.wbs .- s2.wbs) < 0.0001
@@ -66,7 +66,7 @@ end
     v=[1.414213562373095, 2.414213562373095, -1.0, -1.0]
     s = Scaling(zeros(4,4),zeros(4,4),zeros(4,4),zeros(4),cones)
     compute_scaling(cones, s, u, v)
-    s2 = SqrScaling(Diagonal(zeros(4)), zeros(4), cones, 3)
+    s2 = SqrScaling(Diagonal(zeros(4)), Diagonal(zeros(4)), zeros(4), cones, 3, G)
     compute_sqscaling(cones, s2, u, v)
     @test norm(s.l .- s2.l) < 0.0001
     @test norm(s.wbs .- s2.wbs) < 0.0001
@@ -83,10 +83,11 @@ end
     v=[0.42421356237309515, 1.424213562373095, -1.0, -0.9999999999999997]
     s = Scaling(zeros(4,4),zeros(4,4),zeros(4,4),zeros(4),cones)
     compute_scaling(cones, s, u, v)
-    s2 = SqrScaling(Diagonal(zeros(4)), zeros(4), cones, 3)
+    s2 = SqrScaling(Diagonal(zeros(4)), Diagonal(zeros(4)), zeros(4), cones, 3, G)
     compute_sqscaling(cones, s2, u, v)
     fs = compute_full_scaling(cones, s2)
     @test norm(norm(fs .- s.iWiW)) < 0.01
+    @test norm(norm(s2.iW*s2.iW .- s2.iWiW)) < 0.01
 
     #@test norm(norm(s.iWiW .- s2.iWiW)) < 0.01
 end
@@ -115,11 +116,9 @@ end
 	cx,cy,cz,cs = zeros(size(cxr)), zeros(size(cyr)), zeros(size(czr)), zeros(size(csr))
 	mehrotra=true
 	prob = Problem(c, A, b, G, h, cones)
-    sc = Scaling(zeros(4,4),zeros(4,4),zeros(4,4),zeros(4),cones)
-    compute_scaling(cones, sc, s, z)
-    s2 = SqrScaling(Diagonal(zeros(4)), zeros(4), cones, 3)
+    s2 = SqrScaling(Diagonal(zeros(4)), Diagonal(zeros(4)), zeros(4), cones, 3, G)
     compute_sqscaling(cones, s2, s, z)
-    solve_kkt(prob, State(prob, x,y,z,s), s2, sc, dx, dy, dz, ds, cx, cy, cz, cs, true, KKTState(prob))
+    solve_kkt(prob, State(prob, x,y,z,s), s2, dx, dy, dz, ds, cx, cy, cz, cs, true, KKTState(prob))
     @test norm(cx .- cxr) < 0.001
     @test norm(cy .- cyr) < 0.001
     @test norm(cz .- czr) < 0.001
@@ -196,41 +195,43 @@ end
 # x = [vel..., pos..., force...,tot] length 3n
 
 @testset "Linear optimal control" begin
-	n = 50
-	c = [zeros(3n-1); 1.0] # min tot 
-	vel = 1:n; pos = n+1:2*n; force = 2*n+1:3*n-1
-	A = zeros(2*n+2, 3*n)
-	b = zeros(2*n+2)
-	A[vel[1],vel[1]] = 1.0 # vel[1] = 1.0
-	b[vel[1]] = 1.0
-	A[pos[1],pos[1]] = 1.0 # pos[1] = 0.0
-	b[pos[1]] = 0.0
-	for stp=2:n
-		A[vel[stp], vel[stp]] = -1.0 # vel[stp] - vel[stp-1] - force[stp-1] = 0.0
-		A[vel[stp], vel[stp-1]] = 1.0
-		A[vel[stp], force[stp-1]] = 1.0
-		b[vel[stp]] = 0.0
+	n = 50;
+	c = [zeros(3n-1); 1.0] # min tot ;
+	vel = 1:n; pos = n+1:2*n; force = 2*n+1:3*n-1;
+	A = zeros(2*n+2, 3*n);
+	b = zeros(2*n+2);
+	A[vel[1],vel[1]] = 1.0 # vel[1] = 1.0;
+	b[vel[1]] = 1.0;
+	A[pos[1],pos[1]] = 1.0 # pos[1] = 0.0;
+	b[pos[1]] = 0.0;
+	for stp=2:n;
+		A[vel[stp], vel[stp]] = -1.0 # vel[stp] - vel[stp-1] - force[stp-1] = 0.0;
+		A[vel[stp], vel[stp-1]] = 1.0;
+		A[vel[stp], force[stp-1]] = 1.0;
+		b[vel[stp]] = 0.0;
 
-		A[pos[stp], pos[stp]] = -1.0
-		A[pos[stp], pos[stp-1]] = 1.0
-		A[pos[stp], vel[stp-1]] = 1.0
-		b[pos[stp]] = 0.0
-	end
-	A[2*n+1, vel[n]] = 1.0 # vel[n] = 0.0
-	b[2*n+1] = 0.0
-	A[2*n+2, pos[n]] = 1.0
-	b[2*n+2] = 0.0
+		A[pos[stp], pos[stp]] = -1.0;
+		A[pos[stp], pos[stp-1]] = 1.0;
+		A[pos[stp], vel[stp-1]] = 1.0;
+		b[pos[stp]] = 0.0;
+	end;
+	A[2*n+1, vel[n]] = 1.0 # vel[n] = 0.0;
+	b[2*n+1] = 0.0;
+	A[2*n+2, pos[n]] = 1.0;
+	b[2*n+2] = 0.0;
 
-	# G = [0 0 0 -1.0; 0 0 -I 0]
-	G = zeros(n, 3*n)
-	G[1,3*n] = -1.0
-	for i = 1:n-1
-		G[i+1,2*n+i] = -1.0
-	end	
-	h = zeros(n)
-	cones = (SOC(0,n),)
-	prob = Problem(c, A, b, G, h, cones)
-	ss = SolverState(prob)
-	soln = solve_socp(prob, ss)
+	# G = [0 0 0 -1.0; 0 0 -I 0];
+	G = zeros(n, 3*n);
+	G[1,3*n] = -1.0;
+	for i = 1:n-1;
+		G[i+1,2*n+i] = -1.0;
+	end	;
+	h = zeros(n);
+	cones = (SOC(0,n),);
+	prob = Problem(c, A, b, G, h, cones);
+	ss = SolverState(prob);
+	soln = solve_socp(prob, ss);
 	println(soln.x[force])
+	println("Performance evaluation")
+	@time for i=1:100 soln = solve_socp(prob, ss) end
 end

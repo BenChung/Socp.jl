@@ -17,16 +17,16 @@ end
 @generated conedim(::POC{d}) where d = d 
 @generated conedim(::SOC{d}) where d = d
 
-struct Problem{C <: Tuple{Vararg{Cone}}}
+struct Problem{C <: Tuple{Vararg{Cone}}, n, m, k, sing}
 	#minimize c' x
 	c::Vector{Float64} # dim n
 
 	# s.t. A x = b
-	A::SparseMatrixCSC{Float64} # dim m x n 
+	A::SparseMatrixCSC{Float64, Int} # dim m x n 
 	b::Vector{Float64} # dim m
 
 	# s.t. G x + s = h
-	G::SparseMatrixCSC{Float64} # dim k x n
+	G::SparseMatrixCSC{Float64, Int} # dim k x n
 	h::Vector{Float64} # dim k
 
 	# wrt cones
@@ -45,8 +45,17 @@ struct Problem{C <: Tuple{Vararg{Cone}}}
 	    @assert size(G)[2] == n
 	    k = size(G)[1]
 	    @assert length(h) == k
+
+	    sing = false
+	    try 
+	    	cholesky(G' * G)
+		catch e
+			if isa(e, PosDefException) || isa(e, SingularException) || isa(e, ArgumentError)
+				sing = true
+			end
+		end
 	    #todo: check that each variable appears in a type of cone only once
-	    return new{C}(c, A, b, G, h, cones, n, m, k)
+	    return new{C, n, m, k, sing}(c, A, b, G, h, cones, n, m, k)
 	end
 end
 
@@ -65,6 +74,7 @@ struct State
 	end
 end
 
+include("cholutils.jl")
 include("sqrscalings.jl")
 include("scalings.jl")
 include("vectors.jl")

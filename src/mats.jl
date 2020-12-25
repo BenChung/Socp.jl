@@ -102,23 +102,55 @@ mutable struct KKTState
 	eyetgt::Matrix{Float64}
 	iL::Matrix{Float64}
 	issng::Bool
-	AA::Matrix{Float64}
-	function KKTState(pr::Problem)
+	AA::SparseMatrixCSC{Float64, Int}
+
+	Gt::SparseMatrixCSC{Float64, Int}
+	GiW::SuiteSparse.CHOLMOD.Sparse{Float64}
+	AtS::SuiteSparse.CHOLMOD.Sparse{Float64}
+	Gint::SparseMatrixCSC{Float64, Int}
+	Gfact::SuiteSparse.CHOLMOD.Factor{Float64}
+	Afact::SuiteSparse.CHOLMOD.Factor{Float64}
+
+	ws1::LdivWorkspace{Float64}
+	dv1::SuiteSparse.CHOLMOD.Dense{Float64}
+	dv2::SuiteSparse.CHOLMOD.Dense{Float64}
+
+	ws2::LdivWorkspace{Float64}
+	dv3::SuiteSparse.CHOLMOD.Dense{Float64}
+	dv4::SuiteSparse.CHOLMOD.Dense{Float64}
+	function KKTState(pr::Problem{C,n,m,k,sing}) where {C, n, m, k, sing}
 		temp3 = zeros(pr.m)
 		prf3 = zeros(pr.n, pr.n)
 		prf5 = zeros(pr.m, pr.m)
-		AA = zeros(pr.n, pr.n)
+		AA = pr.A'*pr.A
+		if !sing 
+			Gt = sparse(pr.G')
+			desired_stype = 0
+		else
+			Gt = sparse(pr.G'*pr.G + pr.A'*pr.A)
+			desired_stype = -1
+		end 
+		cm = SuiteSparse.CHOLMOD.defaults(SuiteSparse.CHOLMOD.common_struct[Threads.threadid()])
+		GtS = SuiteSparse.CHOLMOD.Sparse(Gt, desired_stype)
+		AtCSC = sparse(pr.A')
+		AtS = SuiteSparse.CHOLMOD.Sparse(AtCSC)
+		Gfact = SuiteSparse.CHOLMOD.analyze(GtS, cm)
+		cholesky!(Gfact, GtS) # get the sparsity pattern right
+		examplemat = SuiteSparse.CHOLMOD.Sparse(sparse((Gfact.UP\AtCSC)'), 0)
+		Afact = SuiteSparse.CHOLMOD.analyze(examplemat, cm) # factorize W^t W, where L W = A or W = L^-1 A; thus W^t = A^t L^-t
 		return new(zeros(pr.k), zeros(pr.k), zeros(pr.k), temp3, zeros(pr.n, pr.k), zeros(pr.n), 
 			prf3, zeros(pr.n), prf5, zeros(pr.n, pr.n), zeros(pr.m, pr.n), Hermitian(prf3), Hermitian(prf5), 
-			Matrix{Float64}(I,pr.n, pr.n), zeros(pr.n, pr.n), false, AA)
+			Matrix{Float64}(I,pr.n, pr.n), zeros(pr.n, pr.n), false, AA, 
+			Gt, GtS, AtS, spzeros(pr.k, pr.n), Gfact, Afact, 
+			LdivWorkspace(Float64), SuiteSparse.CHOLMOD.Dense(zeros(pr.n)), SuiteSparse.CHOLMOD.Dense(zeros(pr.n)),
+			LdivWorkspace(Float64), SuiteSparse.CHOLMOD.Dense(zeros(pr.m)), SuiteSparse.CHOLMOD.Dense(zeros(pr.m)))
 	end
 end
 
-function solve_kkt(pr::Problem, s::State, scaling::SqrScaling, s2::Scaling, 
+function solve_kkt(pr::Problem{C,n,m,k,sing}, s::State, scaling::SqrScaling, 
 				   dx::Vector{Float64}, dy::Vector{Float64}, dz::Vector{Float64}, ds::Vector{Float64}, 
 				   cx::Vector{Float64}, cy::Vector{Float64}, cz::Vector{Float64}, cs::Vector{Float64}, mehrotra::Bool,
-		ss::KKTState)
-	n,m,k = pr.n,pr.m,pr.k
+				   ss::KKTState) where {C, n, m, k, sing}
 	l = scaling.l
 
 	ipr = ss.ipr
@@ -132,91 +164,70 @@ function solve_kkt(pr::Problem, s::State, scaling::SqrScaling, s2::Scaling,
 	prf5 = ss.prf5
 	iR = ss.iR
 	siR = ss.siR
-	prf0 = s2.iWiW
 	et = ss.eyetgt
 	iL = ss.iL
-	aa = ss.AA
 
-	mul!(prf1, pr.G', prf0) #prf1 = G'*W^-1 * W^-T 
-	i1 = pr.G' * scaling.iWiW * pr.G
-	if ss.issng
-		i1 .+= aa
-	end
-	try 
-		LLfactor = cholesky(i1)
+
+	if !sing
+		copyto!(ss.GiW, ss.Gt)
+		lmul!(scaling.iW, ss.GiW)
+		cholesky!(ss.Gfact, ss.GiW)
 		# do the low rank updates
-		modify_factors!(pr.cones, LLfactor, scaling, pr.G)
-		iR = LLfactor\et
-		mul!(siR, pr.A, iR)
-	catch e 
-		if isa(e, PosDefException) || isa(e, SingularException)
-			mul!(aa, pr.A', pr.A)
-			i1 .+= aa
-			LLfactor = cholesky(i1)
-			ss.issng = true		
-			# do the low rank updates
-			modify_factors!(pr.cones, LLfactor, scaling, pr.G)
-			iR = LLfactor\et
-			#ldiv!(iR, LLfactor, et)
-			mul!(siR, pr.A, iR)
-		else 
-			rethrow(e)
-		end
+		modify_factors!(pr.cones, ss.Gfact, scaling, pr.G)
+	else
+		Gint = ss.Gint
+		copyto!(Gint, pr.G)
+		lmul!(scaling.iWiW, Gint)
+		i1 = pr.G' * Gint :: SparseMatrixCSC{Float64, Int}
+		i1 .+= ss.AA
+		cholesky!(ss.Gfact, i1)
+		ss.issng = true		
+		# do the low rank updates
+		modify_factors!(pr.cones, ss.Gfact, scaling, pr.G)
 	end
-#=
-	if mehrotra 
-		mul!(prf1, pr.G', prf0) #prf1 = G'*W^-1 * W^-T 
-		mul!(prf3, prf1, pr.G) #prf3 = G'*W^-1*W^-T*G 
-		if ss.issng # prf3 won't be pos def now if it wasn't before
-			prf3 .+= aa # we know that aa's been populated by now
-			L = cholesky!(ss.hp3)
-		else
-			try
-				L = cholesky!(ss.hp3)
-			catch e 
-				if isa(e, PosDefException) || isa(e, SingularException)
-					mul!(aa, pr.A', pr.A)
-					prf3 .+= aa
-					L = cholesky!(ss.hp3)
-					ss.issng = true
-				else
-					rethrow(e)
-				end
-			end
-		end
-		ldiv!(iR, L, et) #iR = L^-T L^-1
-		mul!(siR, pr.A, iR)
-	end
-=#
+	# convert the factorization to an LLt one (is LDLt if we had to modify the factor)
+	SuiteSparse.CHOLMOD.change_factor!(ss.Gfact, true, false, false, false)
+	# solve L C^t = A^t giving C^t = L^-1 A^t, then transpose to get C = A L^-T
+	i2 = SuiteSparse.CHOLMOD.spsolve(SuiteSparse.CHOLMOD.CHOLMOD_P, ss.Gfact, ss.AtS)
+	Ct = SuiteSparse.CHOLMOD.spsolve(SuiteSparse.CHOLMOD.CHOLMOD_L, ss.Gfact, i2)
+	Ctt = SuiteSparse.CHOLMOD.transpose_(Ct, 1)
+	cholesky!(ss.Afact, Ctt)
+
+
 	iprod!(pr.cones, ipr, l, ds)
 	scale!(pr.cones, scaling, ipr, temp1)
 	bx = dx
 	by = dy
 	temp2 .= dz .- temp1
-	#iscale!(pr.cones, scaling, temp2, temp2)
-	#iscale!(pr.cones, scaling, temp2, temp2)
-	mul!(prf2, prf1, temp2) #prf2 = G'*W^-1 * W^-T*(dz - temp1)
-	#println("A $prrf2 B $prf2")
+	iscale!(pr.cones, scaling, temp2, temp1)
+	iscale!(pr.cones, scaling, temp1, temp1)
+	mul!(prf2, pr.G', temp1) #prf2 = G'*W^-1 * W^-T*(dz - temp1)
 	prf2 .+= bx
-	At = pr.A'
-	if ss.issng
+	At = pr.A' :: Adjoint{Float64, SparseMatrixCSC{Float64, Int}}
+	if sing
 		prf2 .+= At*by
 	end
 
-	mul!(prf5, siR, At)
-	yL = cholesky!(ss.hp5)
-
-	mul!(temp3, siR, prf2)
+	# temp3 = A L-TL-1 prf2
+	copyto!(ss.dv1, prf2)
+	div!(ss.Gfact, ss.dv2, ss.dv1, ss.ws1)
+	copyto!(prf4, ss.dv2)
+	mul!(temp3, pr.A, prf4)
 	temp3 .-= by
-	ldiv!(cy, yL, temp3)
-	if ss.issng
+	copyto!(ss.dv3, temp3)
+	div!(ss.Afact, ss.dv4, ss.dv3, ss.ws2)
+	copyto!(cy, ss.dv4)
+	if sing
 		temp3 .= by .- cy
 	else
 		temp3 .= .-cy
 	end
 	mul!(prf4, At, temp3)
 	prf2 .+= prf4
-	mul!(cx, iR, prf2)
+	# cx = L-TL-1 prf2
+	copyto!(ss.dv1, prf2)
+	div!(ss.Gfact, ss.dv2, ss.dv1, ss.ws1)
+	copyto!(cx, ss.dv2)
 	mul!(temp1, pr.G, cx)
 	temp1 .-= temp2
 	iscale!(pr.cones, scaling, temp1, cz)
