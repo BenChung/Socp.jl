@@ -5,7 +5,7 @@ function allocate_nzs(mat, bv)
 	return res
 end
 
-struct SqrScaling{dim}
+struct SqrScaling{dim} <: AbstractScaling
 	iWiW::Diagonal{Float64, Vector{Float64}}
 	iW::Diagonal{Float64, Vector{Float64}}
 	l::Vector{Float64}
@@ -23,7 +23,7 @@ struct SqrScaling{dim}
 	ws_4::Vector{Vector{Float64}}
 	ws_5::Vector{SparseMatrixCSC{Float64, Int}}
 	ws_6::Vector{SuiteSparse.CHOLMOD.Sparse{Float64}}
-	function SqrScaling(p::Problem) 
+	function SqrScaling{T}(p::Problem) where T
 		return SqrScaling(Diagonal(zeros(p.k)), Diagonal(zeros(p.k)), zeros(p.k), p.cones, p.n, p.G)
 	end
 	function SqrScaling(iWiW, iW,l,cones, id, G) 
@@ -47,7 +47,7 @@ function alloc_ws2(cone::POC{dim}, total) where dim return zeros(0) end
 function alloc_ws1(cone::SOC{dim}, total) where dim return zeros(total) end 
 function alloc_ws2(cone::SOC{dim}, total) where dim return zeros(total) end 
 
-function compute_sqscaling(cone::POC{dim}, cind, scaling::SqrScaling, s, z) where dim
+function compute_scaling(cone::POC{dim}, cind, scaling::SqrScaling, s, z) where dim
 	for i = 1:dim
 		ii = cti(cone, i)
 		scaling.iWiW[ii,ii] = z[ii] / s[ii]
@@ -63,7 +63,7 @@ function modify_factors!(cone::POC{dim}, cind, factor::SuiteSparse.CHOLMOD.Facto
 end
 
 
-function compute_sqscaling(c::SOC{dim}, cind, scaling::SqrScaling, s, z) where dim
+function compute_scaling(c::SOC{dim}, cind, scaling::SqrScaling, s, z) where dim
 	function cone_prod(vect)
 		bsum = vect[1] * vect[1]
 		for i=2:dim
@@ -174,11 +174,11 @@ function modify_factors!(cone::SOC{dim}, cind, factor::SuiteSparse.CHOLMOD.Facto
 	SuiteSparse.CHOLMOD.lowrankupdowndate!(factor, scaling.ws_6[cind], Cint(0))
 end
 
-@unroll function compute_sqscaling(cones::Tuple{Vararg{Cone}}, scaling::SqrScaling, s, z)
+@unroll function compute_scaling(cones::Tuple{Vararg{Cone}}, scaling::SqrScaling, s, z)
 	# assume that cones is in the order POC ... POC SOC ... SOC
 	i=1
 	@unroll for cone in cones
-		compute_sqscaling(cone, i, scaling, s, z)
+		compute_scaling(cone, i, scaling, s, z)
 		i += 1
 	end
 	return scaling

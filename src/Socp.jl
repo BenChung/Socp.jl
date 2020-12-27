@@ -74,6 +74,9 @@ struct State
 	end
 end
 
+abstract type AbstractScaling end 
+abstract type KKTSolver{T} end
+
 include("cholutils.jl")
 include("sqrscalings.jl")
 include("scalings.jl")

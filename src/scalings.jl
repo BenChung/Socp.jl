@@ -1,4 +1,4 @@
-	struct Scaling 
+	struct Scaling <: AbstractScaling
 		W::Matrix{Float64}
 		iW::Matrix{Float64}
 		iWiW::Matrix{Float64}

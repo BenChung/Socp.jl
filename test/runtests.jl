@@ -1,5 +1,5 @@
-using Socp: Problem, State, Cone, POC, SOC, vprod, iprod, make_e, KKTState
-using Socp: compute_scaling, compute_sqscaling, solve_kkt, cgt
+using Socp: Problem, State, Cone, POC, SOC, vprod, iprod, make_e, SparseSolver
+using Socp: compute_scaling, cgt
 using Socp: deg, max_step, solve_socp, Scaling, SqrScaling, scale!, iscale!, SolverState, modify_factors!, compute_full_scaling
 using Test
 using LinearAlgebra
@@ -54,7 +54,7 @@ end
     s = Scaling(zeros(6,6),zeros(6,6),zeros(6,6),zeros(6),tcone)
     compute_scaling(tcone, s, tv1, tv2)
     s2 = SqrScaling(Diagonal(zeros(6)), Diagonal(zeros(6)), zeros(6), tcone, 3, sparse(I, 6, 6))
-    compute_sqscaling(tcone, s2, tv1, tv2)
+    compute_scaling(tcone, s2, tv1, tv2)
     @test norm(s.l .- s2.l) < 0.0001
     @test norm(s.wbs .- s2.wbs) < 0.0001
     @test norm(s.mu .- s2.mu) < 0.0001
@@ -67,7 +67,7 @@ end
     s = Scaling(zeros(4,4),zeros(4,4),zeros(4,4),zeros(4),cones)
     compute_scaling(cones, s, u, v)
     s2 = SqrScaling(Diagonal(zeros(4)), Diagonal(zeros(4)), zeros(4), cones, 3, G)
-    compute_sqscaling(cones, s2, u, v)
+    compute_scaling(cones, s2, u, v)
     @test norm(s.l .- s2.l) < 0.0001
     @test norm(s.wbs .- s2.wbs) < 0.0001
     @test norm(s.mu .- s2.mu) < 0.0001
@@ -84,7 +84,7 @@ end
     s = Scaling(zeros(4,4),zeros(4,4),zeros(4,4),zeros(4),cones)
     compute_scaling(cones, s, u, v)
     s2 = SqrScaling(Diagonal(zeros(4)), Diagonal(zeros(4)), zeros(4), cones, 3, G)
-    compute_sqscaling(cones, s2, u, v)
+    compute_scaling(cones, s2, u, v)
     fs = compute_full_scaling(cones, s2)
     @test norm(norm(fs .- s.iWiW)) < 0.01
     @test norm(norm(s2.iW*s2.iW .- s2.iWiW)) < 0.01
@@ -117,8 +117,9 @@ end
 	mehrotra=true
 	prob = Problem(c, A, b, G, h, cones)
     s2 = SqrScaling(Diagonal(zeros(4)), Diagonal(zeros(4)), zeros(4), cones, 3, G)
-    compute_sqscaling(cones, s2, s, z)
-    solve_kkt(prob, State(prob, x,y,z,s), s2, dx, dy, dz, ds, cx, cy, cz, cs, true, KKTState(prob))
+    compute_scaling(cones, s2, s, z)
+    spsolver = SparseSolver(prob)
+    spsolver(prob, State(prob, x,y,z,s), s2, dx, dy, dz, ds, cx, cy, cz, cs)
     @test norm(cx .- cxr) < 0.001
     @test norm(cy .- cyr) < 0.001
     @test norm(cz .- czr) < 0.001
@@ -135,7 +136,7 @@ end
 	h = [5.0,0.0,0.0,0.0]
 	cones = (POC(0,1), SOC(1,3))
 	prob = Problem(c, A, b, G, h, cones)
-	ss = SolverState(prob)
+	ss = SolverState(prob, SparseSolver(prob))
 	soln = solve_socp(prob, ss)
 	println(soln.x)
 	@test norm(soln.x .- [3.53553, 3.53553, 5.0]) < 0.001
@@ -157,7 +158,7 @@ end
 	h = [-12.0, -3.0, -2.0, 27.0, 0.0, 3.0, -42.0]
 	cones = (SOC(0,3), SOC(3,4))
 	prob = Problem(c, A, b, G, h, cones)
-	ss = SolverState(prob)
+	ss = SolverState(prob, SparseSolver(prob))
 	soln = solve_socp(prob, ss)
 	@test norm(soln.x .- [-5.01467, -5.7669, -8.52176]) < 0.001
 end
@@ -178,7 +179,7 @@ end
 	h = [-12.0, -3.0, -2.0, 27.0, 0.0, 3.0, -42.0]
 	cones = (SOC(0,3), SOC(3,4))
 	prob = Problem(c, A, b, G, h, cones)
-	ss = SolverState(prob)
+	ss = SolverState(prob, SparseSolver(prob))
 	soln = solve_socp(prob, ss)
 	@test norm(soln.x .- [-3.0, -4.82569, -6.64011]) < 0.001
 end
@@ -229,7 +230,7 @@ end
 	h = zeros(n);
 	cones = (SOC(0,n),);
 	prob = Problem(c, A, b, G, h, cones);
-	ss = SolverState(prob);
+	ss = SolverState(prob, SparseSolver(prob));
 	soln = solve_socp(prob, ss);
 	println(soln.x[force])
 	println("Performance evaluation")

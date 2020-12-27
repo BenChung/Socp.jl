@@ -1,6 +1,6 @@
-struct SolverState{cdim}
-	scaling::SqrScaling{cdim}
-	kktstate::KKTState
+struct SolverState{cdim, Solver, Scaling}
+	scaling::Scaling
+	solver::Solver
 	initm::Matrix{Float64}
 	initv::Vector{Float64}
 	idel::Vector{Float64}
@@ -19,9 +19,8 @@ struct SolverState{cdim}
 	rz::Vector{Float64}
 	rs::Vector{Float64}
 
-	function SolverState(pr::Problem)
-		scaling = SqrScaling(pr)
-		ss = KKTState(pr)
+	function SolverState(pr::Problem, solver::K) where K <: KKTSolver{S} where S <: AbstractScaling
+		scaling = S(pr)
 		n = pr.n
 		m = pr.m
 		k = pr.k
@@ -34,14 +33,13 @@ struct SolverState{cdim}
 		mt1 = zeros(m)
 		kt1,kt2,kt3 = zeros(k),zeros(k),zeros(k)
 		rx,ry,rz,rs = zeros(n), zeros(m), zeros(k), zeros(k)
-		return new{pr.n}(scaling, ss, initm, initv, idel, dx, dy, dz, ds, nt1, nt2, mt1, kt1, kt2, kt3, rx, ry, rz, rs)
+		return new{pr.n, K, S}(scaling, solver, initm, initv, idel, dx, dy, dz, ds, nt1, nt2, mt1, kt1, kt2, kt3, rx, ry, rz, rs)
 	end
 end
 
-function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState) where {C,n,m,k,sing}
+function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState{dim, K, S}) where {C,K,S,n,m,k,sing,dim}
 	cones = prob.cones
-
-	scaling, ks = ss.scaling, ss.kktstate
+	
 	initm, initv, idel = ss.initm, ss.initv, ss.idel
 	dx,dy,dz,ds = ss.dx,ss.dy,ss.dz,ss.ds
 	nt1,nt2,mt1,kt1,kt2,kt3 = ss.nt1,ss.nt2,ss.mt1,ss.kt1,ss.kt2,ss.kt3
@@ -105,7 +103,7 @@ function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState) where {C,n,m,k
 #	println("$initials $inits $initz")
 	state = State(prob, initials[1:n], initials[n+1:n+m], initz, inits)
 	for i=1:40
-		scaling = compute_sqscaling(cones, scaling, state.s, state.z)
+		scaling = compute_scaling(cones, ss.scaling, state.s, state.z)
 		l = scaling.l
 		# solve affine direction
 		# dx = prob.A'*state.y .+ prob.G'*state.z .+ prob.c
@@ -125,7 +123,7 @@ function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState) where {C,n,m,k
 			break
 		end
 		rmul!(dx, -1.0); rmul!(dy, -1.0); rmul!(dz, -1.0); rmul!(ds, -1.0)
-		solve_kkt(prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs, true, ks)
+		ss.solver(prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs)
 		scale!(prob.cones, scaling, rz, kt3)
 		iscale!(prob.cones, scaling, rs, kt2)
 		t = compute_step(cones, l, kt3, kt2)
@@ -139,7 +137,7 @@ function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState) where {C,n,m,k
 		mul!(kt2, sig*mu, idel)
 		ds .+= kt2 .- kt1
 		rmul!(dx, scfact); rmul!(dy, scfact); rmul!(dz, scfact)
-		solve_kkt(prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs, false, ks)
+		ss.solver(prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs)
 
 		scale!(prob.cones, scaling, rz, kt3)
 		iscale!(prob.cones, scaling, rs, kt2)

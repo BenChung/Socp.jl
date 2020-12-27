@@ -85,25 +85,16 @@ function scmax(c::SOC{dim}, li, xi) where dim
 	return sqrt(r2s) - a * r1 # norm(r2) - a*r1
 end
 
-mutable struct KKTState
-	ipr::Vector{Float64}
-	temp1::Vector{Float64}
-	temp2::Vector{Float64}
-	temp3::Vector{Float64}
-	prf1::Matrix{Float64}
-	prf2::Vector{Float64}
-	prf3::Matrix{Float64}
-	prf4::Vector{Float64}
-	prf5::Matrix{Float64}
-	iR::Matrix{Float64}
-	siR::Matrix{Float64}
-	hp3::Hermitian
-	hp5::Hermitian
-	eyetgt::Matrix{Float64}
-	iL::Matrix{Float64}
-	issng::Bool
-	AA::SparseMatrixCSC{Float64, Int}
+mutable struct SparseSolver{dim} <: KKTSolver{SqrScaling{dim}}
+	k0::Vector{Float64}
+	k1::Vector{Float64}
+	k2::Vector{Float64}
 
+	n0::Vector{Float64}
+	n1::Vector{Float64}
+
+	m0::Vector{Float64}
+	AA::SparseMatrixCSC{Float64, Int}
 	Gt::SparseMatrixCSC{Float64, Int}
 	GiW::SuiteSparse.CHOLMOD.Sparse{Float64}
 	AtS::SuiteSparse.CHOLMOD.Sparse{Float64}
@@ -118,10 +109,16 @@ mutable struct KKTState
 	ws2::LdivWorkspace{Float64}
 	dv3::SuiteSparse.CHOLMOD.Dense{Float64}
 	dv4::SuiteSparse.CHOLMOD.Dense{Float64}
-	function KKTState(pr::Problem{C,n,m,k,sing}) where {C, n, m, k, sing}
-		temp3 = zeros(pr.m)
-		prf3 = zeros(pr.n, pr.n)
-		prf5 = zeros(pr.m, pr.m)
+	function SparseSolver(pr::Problem{C,n,m,k,sing}) where {C, n, m, k, sing}
+		k0, k1, k2 = zeros(k), zeros(k), zeros(k)
+		n0, n1 = zeros(n), zeros(n)
+		m0 = zeros(m)
+
+		ws1 = LdivWorkspace(Float64)
+		dv1, dv2 = SuiteSparse.CHOLMOD.Dense(zeros(pr.n)), SuiteSparse.CHOLMOD.Dense(zeros(pr.n))
+		ws2 = LdivWorkspace(Float64)
+		dv3, dv4 = SuiteSparse.CHOLMOD.Dense(zeros(pr.m)), SuiteSparse.CHOLMOD.Dense(zeros(pr.m))
+
 		AA = pr.A'*pr.A
 		if !sing 
 			Gt = sparse(pr.G')
@@ -138,36 +135,17 @@ mutable struct KKTState
 		cholesky!(Gfact, GtS) # get the sparsity pattern right
 		examplemat = SuiteSparse.CHOLMOD.Sparse(sparse((Gfact.UP\AtCSC)'), 0)
 		Afact = SuiteSparse.CHOLMOD.analyze(examplemat, cm) # factorize W^t W, where L W = A or W = L^-1 A; thus W^t = A^t L^-t
-		return new(zeros(pr.k), zeros(pr.k), zeros(pr.k), temp3, zeros(pr.n, pr.k), zeros(pr.n), 
-			prf3, zeros(pr.n), prf5, zeros(pr.n, pr.n), zeros(pr.m, pr.n), Hermitian(prf3), Hermitian(prf5), 
-			Matrix{Float64}(I,pr.n, pr.n), zeros(pr.n, pr.n), false, AA, 
-			Gt, GtS, AtS, spzeros(pr.k, pr.n), Gfact, Afact, 
-			LdivWorkspace(Float64), SuiteSparse.CHOLMOD.Dense(zeros(pr.n)), SuiteSparse.CHOLMOD.Dense(zeros(pr.n)),
-			LdivWorkspace(Float64), SuiteSparse.CHOLMOD.Dense(zeros(pr.m)), SuiteSparse.CHOLMOD.Dense(zeros(pr.m)))
+		Gint = spzeros(pr.k, pr.n)
+		return new{n}(k0, k1, k2, n0, n1, m0,
+			AA, Gt, GtS, AtS, Gint, Gfact, Afact, 
+			ws1, dv1, dv2,
+			ws2, dv3, dv4)
 	end
 end
 
-function solve_kkt(pr::Problem{C,n,m,k,sing}, s::State, scaling::SqrScaling, 
+function (ss::SparseSolver)(pr::Problem{C,n,m,k,sing}, s::State, scaling::SqrScaling, 
 				   dx::Vector{Float64}, dy::Vector{Float64}, dz::Vector{Float64}, ds::Vector{Float64}, 
-				   cx::Vector{Float64}, cy::Vector{Float64}, cz::Vector{Float64}, cs::Vector{Float64}, mehrotra::Bool,
-				   ss::KKTState) where {C, n, m, k, sing}
-	l = scaling.l
-
-	ipr = ss.ipr
-	temp1 = ss.temp1
-	temp2 = ss.temp2
-	temp3 = ss.temp3
-	prf1 = ss.prf1
-	prf2 = ss.prf2
-	prf3 = ss.prf3
-	prf4 = ss.prf4
-	prf5 = ss.prf5
-	iR = ss.iR
-	siR = ss.siR
-	et = ss.eyetgt
-	iL = ss.iL
-
-
+				   cx::Vector{Float64}, cy::Vector{Float64}, cz::Vector{Float64}, cs::Vector{Float64}) where {C, n, m, k, sing}
 	if !sing
 		copyto!(ss.GiW, ss.Gt)
 		lmul!(scaling.iW, ss.GiW)
@@ -181,10 +159,9 @@ function solve_kkt(pr::Problem{C,n,m,k,sing}, s::State, scaling::SqrScaling,
 		i1 = pr.G' * Gint :: SparseMatrixCSC{Float64, Int}
 		i1 .+= ss.AA
 		cholesky!(ss.Gfact, i1)
-		ss.issng = true		
 		# do the low rank updates
 		modify_factors!(pr.cones, ss.Gfact, scaling, pr.G)
-	end
+	end	
 	# convert the factorization to an LLt one (is LDLt if we had to modify the factor)
 	SuiteSparse.CHOLMOD.change_factor!(ss.Gfact, true, false, false, false)
 	# solve L C^t = A^t giving C^t = L^-1 A^t, then transpose to get C = A L^-T
@@ -194,45 +171,45 @@ function solve_kkt(pr::Problem{C,n,m,k,sing}, s::State, scaling::SqrScaling,
 	cholesky!(ss.Afact, Ctt)
 
 
-	iprod!(pr.cones, ipr, l, ds)
-	scale!(pr.cones, scaling, ipr, temp1)
+	iprod!(pr.cones, ss.k0, scaling.l, ds)
+	scale!(pr.cones, scaling, ss.k0, ss.k1)
 	bx = dx
 	by = dy
-	temp2 .= dz .- temp1
-	iscale!(pr.cones, scaling, temp2, temp1)
-	iscale!(pr.cones, scaling, temp1, temp1)
-	mul!(prf2, pr.G', temp1) #prf2 = G'*W^-1 * W^-T*(dz - temp1)
-	prf2 .+= bx
+	ss.k2 .= dz .- ss.k1
+	iscale!(pr.cones, scaling, ss.k2, ss.k1)
+	iscale!(pr.cones, scaling, ss.k1, ss.k1)
+	mul!(ss.n0, pr.G', ss.k1) #ss.n0 = G'*W^-1 * W^-T*(dz - ss.k1)
+	ss.n0 .+= bx
 	At = pr.A' :: Adjoint{Float64, SparseMatrixCSC{Float64, Int}}
 	if sing
-		prf2 .+= At*by
+		ss.n0 .+= At*by
 	end
 
-	# temp3 = A L-TL-1 prf2
-	copyto!(ss.dv1, prf2)
+	# ss.m0 = A L-TL-1 ss.n0
+	copyto!(ss.dv1, ss.n0)
 	div!(ss.Gfact, ss.dv2, ss.dv1, ss.ws1)
-	copyto!(prf4, ss.dv2)
-	mul!(temp3, pr.A, prf4)
-	temp3 .-= by
-	copyto!(ss.dv3, temp3)
+	copyto!(ss.n1, ss.dv2)
+	mul!(ss.m0, pr.A, ss.n1)
+	ss.m0 .-= by
+	copyto!(ss.dv3, ss.m0)
 	div!(ss.Afact, ss.dv4, ss.dv3, ss.ws2)
 	copyto!(cy, ss.dv4)
 	if sing
-		temp3 .= by .- cy
+		ss.m0 .= by .- cy
 	else
-		temp3 .= .-cy
+		ss.m0 .= .-cy
 	end
-	mul!(prf4, At, temp3)
-	prf2 .+= prf4
-	# cx = L-TL-1 prf2
-	copyto!(ss.dv1, prf2)
+	mul!(ss.n1, At, ss.m0)
+	ss.n0 .+= ss.n1
+	# cx = L-TL-1 ss.n0
+	copyto!(ss.dv1, ss.n0)
 	div!(ss.Gfact, ss.dv2, ss.dv1, ss.ws1)
 	copyto!(cx, ss.dv2)
-	mul!(temp1, pr.G, cx)
-	temp1 .-= temp2
-	iscale!(pr.cones, scaling, temp1, cz)
+	mul!(ss.k1, pr.G, cx)
+	ss.k1 .-= ss.k2
+	iscale!(pr.cones, scaling, ss.k1, cz)
 	iscale!(pr.cones, scaling, cz, cz)
-	scale!(pr.cones, scaling, cz, temp1)
-	ipr .-= temp1
-	scale!(pr.cones, scaling, ipr, cs)
+	scale!(pr.cones, scaling, cz, ss.k1)
+	ss.k0 .-= ss.k1
+	scale!(pr.cones, scaling, ss.k0, cs)
 end
