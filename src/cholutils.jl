@@ -38,9 +38,9 @@ function LinearAlgebra.lmul!(l::Diagonal, r::SuiteSparse.CHOLMOD.Sparse)
 end
 
 struct LdivWorkspace{T<:SuiteSparse.CHOLMOD.VTypes}
-	Xref::Ref{Ptr{I}} where I
-	Y::Ref{Ptr{I}} where I
-	E::Ref{Ptr{I}} where I
+	Xref::Ref{Ptr{Nothing}}
+	Y::Ref{Ptr{Nothing}}
+	E::Ref{Ptr{Nothing}}
 	LdivWorkspace(::Type{T}) where T = new{T}(Ref(C_NULL), Ref(C_NULL), Ref(C_NULL))
 end
 
@@ -57,7 +57,7 @@ function div!(F::SuiteSparse.CHOLMOD.Factor{Tv}, x::SuiteSparse.CHOLMOD.Dense{Tv
             throw(LinearAlgebra.ZeroPivotException(s.minor))
         end
     end
-    W.Xref[] = Base.unsafe_convert(Ptr{SuiteSparse.CHOLMOD.C_Dense{Tv}}, x)
+    W.Xref[] = Base.unsafe_convert(Ptr{Nothing}, Base.unsafe_convert(Ptr{SuiteSparse.CHOLMOD.C_Dense{Tv}}, x))
     res = ccall((SuiteSparse.CHOLMOD.@cholmod_name("solve2"),:libcholmod), Cint,
             (	# input
             	Cint, Ptr{SuiteSparse.CHOLMOD.C_Factor{Tv}}, Ptr{SuiteSparse.CHOLMOD.C_Dense{Tv}}, Ptr{Nothing},
