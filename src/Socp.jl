@@ -82,6 +82,8 @@ include("sqrscalings.jl")
 include("scalings.jl")
 include("vectors.jl")
 include("mats.jl")
+include("spsolver.jl")
+include("densesolver.jl")
 include("solver.jl")
 include("moi.jl")
 

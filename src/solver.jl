@@ -39,7 +39,7 @@ end
 
 function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState{dim, K, S}) where {C,K,S,n,m,k,sing,dim}
 	cones = prob.cones
-	
+
 	initm, initv, idel = ss.initm, ss.initv, ss.idel
 	dx,dy,dz,ds = ss.dx,ss.dy,ss.dz,ss.ds
 	nt1,nt2,mt1,kt1,kt2,kt3 = ss.nt1,ss.nt2,ss.mt1,ss.kt1,ss.kt2,ss.kt3
@@ -123,7 +123,8 @@ function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState{dim, K, S}) whe
 			break
 		end
 		rmul!(dx, -1.0); rmul!(dy, -1.0); rmul!(dz, -1.0); rmul!(ds, -1.0)
-		ss.solver(prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs)
+		setup_iter(ss.solver, prob, state, scaling)
+		solve_kkt(ss.solver, prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs)
 		scale!(prob.cones, scaling, rz, kt3)
 		iscale!(prob.cones, scaling, rs, kt2)
 		t = compute_step(cones, l, kt3, kt2)
@@ -137,7 +138,7 @@ function solve_socp(prob::Problem{C,n,m,k,sing}, ss::SolverState{dim, K, S}) whe
 		mul!(kt2, sig*mu, idel)
 		ds .+= kt2 .- kt1
 		rmul!(dx, scfact); rmul!(dy, scfact); rmul!(dz, scfact)
-		ss.solver(prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs)
+		solve_kkt(ss.solver, prob, state, scaling, dx, dy, dz, ds, rx, ry, rz, rs)
 
 		scale!(prob.cones, scaling, rz, kt3)
 		iscale!(prob.cones, scaling, rs, kt2)
