@@ -205,9 +205,9 @@ function MOI.optimize!(instance::Optimizer)
     cone = instance.cone
     m = instance.data.m
     n = instance.data.n
-    A = Array{Float64,2}(sparse(instance.data.IA, instance.data.JA, instance.data.VA, cone.f, n))
+    A = sparse(instance.data.IA, instance.data.JA, instance.data.VA, cone.f, n)
     b = instance.data.b
-    G = Array{Float64,2}(sparse(instance.data.IG, instance.data.JG, instance.data.VG, m, n))
+    G = sparse(instance.data.IG, instance.data.JG, instance.data.VG, m, n)
     h = instance.data.h
     objconstant = instance.data.objconstant
     c = instance.data.c
@@ -219,7 +219,7 @@ function MOI.optimize!(instance::Optimizer)
     	offs += q
     end
     prob = Socp.Problem(c, A, b, G, h, cones)
-    res = solve_socp(prob, Socp.SolverState(prob))
+    res = solve_socp(prob, Socp.SparseSolver(prob))
     instance.sol = res
 end
 
